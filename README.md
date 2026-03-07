@@ -13,7 +13,7 @@ duplicate nodes, document prefixes, or other complex features supported by YAML.
 * YES/NO for booleans
 * tags
 * structures (anchors, aliases, `---` separators)
-* unordered Sets
+* unordered sets
 * duplicate keys
 * JSON compatibility quirks
 * empty nodes
