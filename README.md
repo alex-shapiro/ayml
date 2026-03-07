@@ -18,6 +18,6 @@ duplicate nodes, document prefixes, or other complex features supported by YAML.
 * JSON compatibility quirks
 * empty nodes
 * `?` indicators
-* directives (except an optional `%AYML 1.0`)
+* directives
 * document prefixes
 * mult-document files

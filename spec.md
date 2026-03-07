@@ -47,7 +47,7 @@ A comment begins with a `#`.
 
 #### Mapping Key Ordering
 
-If an AYML mapping is coded without a target data model, mapping keys are not guaranteed to be ordered (e.g. a `HashMap`)
+If an AYML mapping is coded without a target data model, mapping keys are not guaranteed to be ordered (e.g. a `HashMap`).
 If an AYML mapping is coded with a target data model, the data model determines ordering guarantees.
 
 **Example: Sequence of Scalars (ball players)**
@@ -154,7 +154,7 @@ is_bad: false
 
 **Integer**
 
-An AYML decoder must support 64-bit integers
+An AYML decoder MUST support 64-bit signed integers.
 
 ```
 decimal: 12345
@@ -165,7 +165,7 @@ hexadecimal: 0xC
 
 **Float**
 
-An AYML decoder must support 64-bit floating point numbers, including `inf` and `nan`:
+An AYML decoder MUST support 64-bit (double precision) floating point numbers, including `inf` and `nan`:
 
 ```
 canonical: 1.23015e+3
@@ -369,6 +369,7 @@ A quantified term:
 * `term?`, which matches `(term | <empty>)`.
 * `term*`, which matches `(term term* | <empty>)`.
 * `term+`, which matches `(term term*)`.
+* `term{n}`, which matches exactly `n` consecutive occurrences of `term`.
 
 > Note: Quantified terms are always greedy.
 
@@ -396,7 +397,9 @@ each with a fixed value for each parameter.
 
 The parameters are as follows:
 
-* `n` : The current indentation level. May be any natural number, including zero.
+* `n` : The current indentation level. May be any non-negative integer.
+* `m` : An auto-detected indentation level. See
+  [Indentation Auto-Detection](#indentation-auto-detection).
 * `c`: Context to distinguish between block and flow parsing. May be one of:
   * `BLOCK` -- inside a block collection
   * `FLOW` -- inside a flow collection
@@ -683,6 +686,17 @@ s-indent-less-or-equal(n) ::=
     s-space{m}    # where m <= n
 ```
 
+### Indentation Auto-Detection
+
+When a block collection or scalar value appears on a subsequent line (for
+example, as the value of a mapping entry), the indentation level `m` is
+_auto-detected_ from the first content line. The auto-detected level MUST
+satisfy any stated constraint (e.g., `m > n`). All subsequent entries or
+content lines within the same block MUST use the same indentation level `m`.
+
+In the grammar, auto-detected indentation is written as a free variable `m`
+with a constraint comment.
+
 ## Separation
 
 A separation in line is one or more white space characters.
@@ -722,7 +736,7 @@ s-b-comment ::=
 A full-line comment:
 
 ```
-l-comment ::=
+l-comment(n) ::=
     s-indent-less-or-equal(n)
     c-nb-comment-text
     b-break
@@ -731,7 +745,7 @@ l-comment ::=
 Consecutive comment lines form a multi-line comment:
 
 ```
-l-comment-block ::= l-comment+
+l-comment-block(n) ::= l-comment(n)+
 ```
 
 
@@ -740,7 +754,7 @@ l-comment-block ::= l-comment+
 ## Null
 
 ```
-c-null ::= "null"
+ns-null ::= "null"
 ```
 
 **Example:**
@@ -753,7 +767,7 @@ optional field: null
 ## Boolean
 
 ```
-c-bool ::= "true" | "false"
+ns-bool ::= "true" | "false"
 ```
 
 **Example:**
@@ -908,20 +922,31 @@ c-triple-quote ::= '"""'
 ```
 nb-triple-char ::=
     c-ns-esc-char
-  | c-escape-break
   | ( nb-char - c-escape )
 ```
 
+The indentation level `m` is determined by the indentation of the closing
+`"""`. Each content line MUST begin with at least `m` leading spaces, which
+are stripped. Blank lines (empty or containing only whitespace) are preserved
+as empty lines and need not have `m` spaces. A `\` at the end of a line
+(before the line break) suppresses the line break; the next line's content
+(after stripping `m` leading spaces) is joined directly to the current line.
+
 ```
-l-triple-content-line(n) ::=
-    s-indent(n) nb-triple-char*
+l-triple-content-line(m) ::=
+    s-indent(m) nb-triple-char*
+    ( c-escape-break s-indent(m) nb-triple-char* )*
 ```
 
 ```
-c-triple-quoted(n) ::=
+l-triple-blank-line ::= s-space*
+```
+
+```
+c-triple-quoted ::=
     c-triple-quote b-break
-    ( l-triple-content-line(n) b-break )*
-    s-indent(n) c-triple-quote
+    ( ( l-triple-content-line(m) | l-triple-blank-line ) b-break )*
+    s-indent(m) c-triple-quote
 ```
 
 **Example:**
@@ -954,8 +979,8 @@ code: """
 When parsing an unquoted (bare) scalar value, the parser SHOULD attempt to
 match in this order:
 
-1. `c-null`
-2. `c-bool`
+1. `ns-null`
+2. `ns-bool`
 3. `ns-integer`
 4. `ns-float`
 5. `ns-bare-string`
@@ -983,11 +1008,11 @@ Words like `yes`, `no`, `on`, `off`, and date-like strings
 such as `2001-01-23` are parsed as strings.
 
 ```
-ns-scalar(n,c) ::=
+ns-scalar(c) ::=
     c-double-quoted
-  | c-triple-quoted(n)
-  | c-null
-  | c-bool
+  | c-triple-quoted
+  | ns-null
+  | ns-bool
   | ns-integer
   | ns-float
   | ns-bare-string(c)
@@ -995,6 +1020,21 @@ ns-scalar(n,c) ::=
 
 
 # Chapter: Collection Productions
+
+## Block Gaps
+
+Between block collection entries, blank lines and comment lines are allowed.
+These are collectively called _gaps_.
+
+```
+l-block-blank-line ::= s-white* b-break
+```
+
+```
+l-block-gap(n) ::=
+    l-block-blank-line
+  | l-comment(n)
+```
 
 ## Block Sequence
 
@@ -1006,17 +1046,44 @@ is at indentation `n+2` (the dash plus the space). This means a block
 sequence can appear as a mapping value at the same indentation level as
 the mapping key, because the `- ` itself provides the required nesting.
 
+When a sequence entry contains a mapping, the first mapping entry may appear
+on the same line as `- ` (compact notation). The remaining entries appear on
+subsequent lines at indentation `n+2`.
+
+```
+ns-compact-mapping-entry(n) ::=
+    ns-mapping-key(BLOCK)
+    s-white*
+    c-mapping-value
+    (
+        s-white+ ns-flow-node(BLOCK)                  # Value on same line
+      | s-b-comment                                    # Value on next line(s)
+        ( l-block-sequence(m)                          # Sequence, m >= n
+        | l-block-mapping(m)                           # Nested mapping, m > n
+        | s-indent(m) ns-flow-node(BLOCK)              # Scalar/flow value, m > n
+        )
+    )
+```
+
+```
+ns-compact-mapping(n) ::=
+    ns-compact-mapping-entry(n)
+    ( b-break l-block-gap(n)* l-block-mapping-entry(n) )*
+```
+
 ```
 l-block-seq-entry(n) ::=
     s-indent(n)
     c-sequence-entry s-white
-    ns-block-node(n+2,BLOCK)
+    ( ns-compact-mapping(n+2)                    # Compact mapping
+    | ns-flow-node(BLOCK)                        # Scalar or flow collection
+    )
 ```
 
 ```
 l-block-sequence(n) ::=
     l-block-seq-entry(n)
-    ( b-break l-block-seq-entry(n) )*
+    ( b-break l-block-gap(n)* l-block-seq-entry(n) )*
 ```
 
 **Example:**
@@ -1037,10 +1104,10 @@ by the parser, not expressible in the grammar).
 A mapping key is any non-null scalar:
 
 ```
-ns-mapping-key(n,c) ::=
+ns-mapping-key(c) ::=
     c-double-quoted
-  | c-triple-quoted(n)
-  | c-bool
+  | c-triple-quoted
+  | ns-bool
   | ns-integer
   | ns-float
   | ns-bare-string(c)
@@ -1050,21 +1117,22 @@ A mapping key MUST NOT resolve to null. To use the string `"null"` as a key,
 quote it.
 
 A mapping entry. The value may appear on the same line or on subsequent
-lines. When the value is on subsequent lines, it is indented either
-explicitly (for mappings, scalars, and sequences) or implicitly (for
-sequences that use `- ` as implicit indentation):
+lines. When the value is on subsequent lines, the indentation level `m` is
+auto-detected. For sequences, `m >= n` (because `- ` provides implicit
+nesting). For other values, `m > n`.
 
 ```
 l-block-mapping-entry(n) ::=
     s-indent(n)
-    ns-mapping-key(n,BLOCK)
+    ns-mapping-key(BLOCK)
     s-white*
     c-mapping-value
     (
-        s-white+ ns-block-node(n+1,BLOCK)       # Value on same line
-      | s-b-comment                               # Value on next line(s)
-        ( l-block-sequence(n)                    # Sequence at same indent
-        | ns-block-node(n+1,BLOCK)               # Other values indented
+        s-white+ ns-flow-node(BLOCK)                  # Value on same line
+      | s-b-comment                                    # Value on next line(s)
+        ( l-block-sequence(m)                          # Sequence, m >= n
+        | l-block-mapping(m)                           # Nested mapping, m > n
+        | s-indent(m) ns-flow-node(BLOCK)              # Scalar/flow value, m > n
         )
     )
 ```
@@ -1072,7 +1140,7 @@ l-block-mapping-entry(n) ::=
 ```
 l-block-mapping(n) ::=
     l-block-mapping-entry(n)
-    ( b-break l-block-mapping-entry(n) )*
+    ( b-break l-block-gap(n)* l-block-mapping-entry(n) )*
 ```
 
 **Example:**
@@ -1090,16 +1158,16 @@ A flow sequence is a comma-separated list within square brackets `[]`.
 Trailing commas are allowed. Flow sequences may span multiple lines.
 
 ```
-ns-flow-seq-entry(n) ::= ns-flow-node(n,FLOW)
+ns-flow-seq-entry ::= ns-flow-node(FLOW)
 ```
 
 ```
-c-flow-sequence(n) ::=
+c-flow-sequence ::=
     c-sequence-start
     s-flow-white*
     (
-        ns-flow-seq-entry(n)
-        ( s-flow-white* c-collect-entry s-flow-white* ns-flow-seq-entry(n) )*
+        ns-flow-seq-entry
+        ( s-flow-white* c-collect-entry s-flow-white* ns-flow-seq-entry )*
         ( s-flow-white* c-collect-entry )?     # Optional trailing comma
     )?
     s-flow-white*
@@ -1121,21 +1189,21 @@ braces `{}`. Trailing commas are allowed. Flow mappings may span multiple
 lines.
 
 ```
-ns-flow-mapping-entry(n) ::=
-    ns-mapping-key(n,FLOW)
+ns-flow-mapping-entry ::=
+    ns-mapping-key(FLOW)
     s-flow-white*
     c-mapping-value
     s-flow-white*
-    ns-flow-node(n,FLOW)
+    ns-flow-node(FLOW)
 ```
 
 ```
-c-flow-mapping(n) ::=
+c-flow-mapping ::=
     c-mapping-start
     s-flow-white*
     (
-        ns-flow-mapping-entry(n)
-        ( s-flow-white* c-collect-entry s-flow-white* ns-flow-mapping-entry(n) )*
+        ns-flow-mapping-entry
+        ( s-flow-white* c-collect-entry s-flow-white* ns-flow-mapping-entry )*
         ( s-flow-white* c-collect-entry )?     # Optional trailing comma
     )?
     s-flow-white*
@@ -1160,30 +1228,34 @@ Sammy Sosa: {
 A flow node is a scalar or flow collection:
 
 ```
-ns-flow-node(n,c) ::=
-    ns-scalar(n,c)
-  | c-flow-sequence(n)
-  | c-flow-mapping(n)
+ns-flow-node(c) ::=
+    ns-scalar(c)
+  | c-flow-sequence
+  | c-flow-mapping
 ```
 
-A block node is a flow node or a block collection:
+A block node is a scalar, flow collection, or block collection:
 
 ```
-ns-block-node(n,c) ::=
-    ns-flow-node(n,c)
-  | l-block-sequence(n)
+ns-block-node(n) ::=
+    l-block-sequence(n)
   | l-block-mapping(n)
+  | ns-flow-node(BLOCK)
 ```
+
+> Note: Block collections are tried before flow nodes so that a mapping
+> key followed by `: ` is not consumed as a bare string.
 
 
 ## Document
 
-An AYML file contains exactly one document. A document is optional leading comments and a single root node:
+An AYML file contains exactly one document. A document is optional leading
+comments and a single root node:
 
 ```
 l-ayml-document ::=
-    l-comment-block?
-    ns-block-node(0,BLOCK)
+    l-comment-block(0)?
+    ns-block-node(0)
     b-break?
     <end-of-input>
 ```
