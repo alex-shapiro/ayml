@@ -1326,7 +1326,7 @@ An AYML document MAY optionally begin with a version directive:
 
 ```
 l-ayml-directive ::=
-    '%' "AYML" s-white+ "1.0" b-break
+    "% AYML 1.0" b-break
 ```
 
 
