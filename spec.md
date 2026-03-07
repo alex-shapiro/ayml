@@ -927,6 +927,8 @@ multi-line string comment rule.
 A `\` at the end of a line folds the next line into the current one — the
 line break and leading whitespace of the continuation line are removed.
 
+Trailing newlines are stripped from multi-line bare strings.
+
 In a **flow context**, bare strings are additionally terminated by flow
 indicators (`,`, `]`, `}`).
 
@@ -1007,6 +1009,8 @@ A bar-prefix string begins with `|` on the mapping value line, followed by
 indented content on subsequent lines. All content — including quotes, `#`
 characters, and `\` — is literal.
 
+Trailing newlines are stripped from bar-prefix strings.
+
 ```
 l-bar-content-line(n) ::=
     s-indent(n) nb-char+
@@ -1019,11 +1023,6 @@ ns-bar-prefix-string(n) ::=
     l-bar-content-line(n)
     ( b-break l-bar-content-line(n) )*
 ```
-
-> **Flag:** Trailing newline handling is unspecified. YAML's block scalars
-> have "chomping" (strip/clip/keep) for trailing newlines. The Language
-> Overview does not address this. Does the final line of a bar-prefix string
-> include a trailing newline or not?
 
 **Example:**
 
@@ -1087,11 +1086,16 @@ ns-scalar(n,c) ::=
 A block sequence is a series of entries, each indicated by a `- ` (dash
 followed by a space). Each entry begins at the same indentation level.
 
+The `- ` indicator provides implicit indentation — the content after `- `
+is at indentation `n+2` (the dash plus the space). This means a block
+sequence can appear as a mapping value at the same indentation level as
+the mapping key, because the `- ` itself provides the required nesting.
+
 ```
 l-block-seq-entry(n) ::=
     s-indent(n)
     c-sequence-entry s-white
-    ns-block-indented-node(n+1,BLOCK)
+    ns-block-indented-node(n+2,BLOCK)
 ```
 
 ```
@@ -1099,17 +1103,6 @@ l-block-sequence(n) ::=
     l-block-seq-entry(n)
     ( b-break l-block-seq-entry(n) )*
 ```
-
-> **Flag:** In the "Mapping Scalars to Sequences" example, the sequence
-> entries are at the *same* indentation level as the parent mapping key:
-> ```
-> american:
-> - Boston Red Sox
-> ```
-> This is allowed in YAML (the `-` indicator provides an implicit extra
-> level of indentation). The grammar handles this through `ns-block-node`
-> allowing a block sequence at the current level when the sequence is the
-> value of a mapping entry.
 
 **Example:**
 
@@ -1133,12 +1126,13 @@ ns-block-mapping-key(n) ::=
   | c-single-quoted(n)
 ```
 
-> **Flag:** The Language Overview only shows single-line mapping keys. This
-> grammar restricts keys to single-line scalars. Multi-line keys are not
-> supported.
+Mapping keys MUST be single-line scalars. Multi-line mapping keys are not
+supported.
 
 A mapping entry. The value may appear on the same line or on subsequent
-indented lines:
+lines. When the value is on subsequent lines, it is indented either
+explicitly (for mappings, scalars, and sequences) or implicitly (for
+sequences that use `- ` as implicit indentation):
 
 ```
 l-block-mapping-entry(n) ::=
@@ -1149,7 +1143,9 @@ l-block-mapping-entry(n) ::=
     (
         s-white+ ns-block-node(n+1,BLOCK)       # Value on same line
       | s-b-comment                               # Value on next line(s)
-        ns-block-node(n+1,BLOCK)
+        ( l-block-sequence(n)                    # Sequence at same indent
+        | ns-block-node(n+1,BLOCK)               # Other values indented
+        )
     )
 ```
 
@@ -1268,14 +1264,6 @@ ns-block-node(n,c) ::=
   | l-block-sequence(n)
   | l-block-mapping(n)
 ```
-
-> **Flag:** The interaction between block mappings and block sequences as
-> values needs care. When a mapping value is a sequence, the examples show
-> the sequence at the *parent* indentation level (e.g., `american:\n- Boston`).
-> This means `ns-block-node(n+1,BLOCK)` for a mapping value must be able to
-> match `l-block-sequence(n)` — the sequence entries start at the parent's
-> level because the `-` provides implicit indentation. This may require an
-> adjustment to the indentation parameter in the mapping entry production.
 
 
 ## AYML Directive
