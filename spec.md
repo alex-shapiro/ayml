@@ -47,8 +47,7 @@ A comment begins with a `#`.
 
 #### Mapping Key Ordering
 
-If an AYML mapping is coded without a target data model, mapping keys are not guaranteed to be ordered (e.g. a `HashMap`).
-If an AYML mapping is coded with a target data model, the data model determines ordering guarantees.
+AYML does not define an ordering for mapping keys. Implementations MAY preserve insertion order.
 
 **Example: Sequence of Scalars (ball players)**
 
@@ -293,7 +292,7 @@ product:
   description : Super Hoop
   price       : 2392.00
 tax  : 251.42
-total: 4443.52
+total: 4443.42
 comments: """
   Late afternoon is best.
   Backup contact is Nancy
@@ -639,7 +638,7 @@ c-ns-esc-char ::=
         '0'                   # Null (x00)
       | 'a'                   # Bell (x07)
       | 'b'                   # Backspace (x08)
-      | 't' | x09             # Horizontal tab (x09)
+      | 't'                   # Horizontal tab (x09)
       | 'n'                   # Line feed (x0A)
       | 'v'                   # Vertical tab (x0B)
       | 'f'                   # Form feed (x0C)
@@ -705,10 +704,14 @@ A separation in line is one or more white space characters.
 s-separate-in-line ::= s-white+
 ```
 
-In flow collections, whitespace includes line breaks:
+In flow collections, whitespace includes line breaks and comments:
 
 ```
-s-flow-white ::= s-white | b-break
+s-flow-line-comment ::= s-separate-in-line c-nb-comment-text? b-break
+```
+
+```
+s-flow-white ::= s-white | s-flow-line-comment | b-break
 ```
 
 
@@ -807,7 +810,7 @@ An AYML decoder MUST support 64-bit (double precision) floating point numbers.
 
 ```
 ns-float ::=
-    ( '-' | '+' )? ns-dec-digit+ '.' ns-dec-digit*
+    ( '-' | '+' )? ns-dec-digit+ '.' ns-dec-digit+
         ( ( 'e' | 'E' ) ( '-' | '+' )? ns-dec-digit+ )?    # Fixed/exponential
   | ( '-' | '+' )? ns-dec-digit+
         ( 'e' | 'E' ) ( '-' | '+' )? ns-dec-digit+         # Pure exponential
@@ -1046,6 +1049,11 @@ is at indentation `n+2` (the dash plus the space). This means a block
 sequence can appear as a mapping value at the same indentation level as
 the mapping key, because the `- ` itself provides the required nesting.
 
+The entry value MUST begin on the same line as `- `. A `- ` followed by
+only whitespace and a line break is a parse error (there are no empty nodes
+in AYML). To nest block collections inside a sequence, use flow syntax
+(`[]`, `{}`) or compact mapping notation.
+
 When a sequence entry contains a mapping, the first mapping entry may appear
 on the same line as `- ` (compact notation). The remaining entries appear on
 subsequent lines at indentation `n+2`.
@@ -1156,6 +1164,7 @@ rbi: 147
 
 A flow sequence is a comma-separated list within square brackets `[]`.
 Trailing commas are allowed. Flow sequences may span multiple lines.
+Indentation is not significant inside flow collections.
 
 ```
 ns-flow-seq-entry ::= ns-flow-node(FLOW)
@@ -1250,13 +1259,13 @@ ns-block-node(n) ::=
 ## Document
 
 An AYML file contains exactly one document. A document is optional leading
-comments and a single root node:
+comments, a single root node, and optional trailing comments or blank lines:
 
 ```
 l-ayml-document ::=
     l-comment-block(0)?
     ns-block-node(0)
-    b-break?
+    ( b-break l-block-gap(0)* )?
     <end-of-input>
 ```
 
