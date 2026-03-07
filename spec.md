@@ -177,7 +177,8 @@ not a number: nan
 
 **Strings**
 
-There are three kinds of strings: bare, single-quoted, and double-quoted.
+There are three kinds of single-line strings: bare, single-quoted, and double-quoted.
+For multi-line strings, use triple-quoted strings (`"""`).
 
 ```
 unicode: "Sosa did fine.\u263A"
@@ -189,26 +190,28 @@ quoted: ' # Not a ''comment''.'
 tie-fighter: '|\-*-/|'
 ```
 
-Multi-line strings are allowed. Every newline in a string is preserved unless the line ends with `\`, in which case the next line is folded directly into the current line. A multi-line string that starts with `|` will allow quotes.
+Triple-quoted strings (`"""`) are the only multi-line string format. The closing
+`"""` indentation determines whitespace stripping (like Swift). Escape sequences
+are supported. A `\` at the end of a line suppresses the line break.
 
 ```
-plain:
-  This unquoted scalar
+plain: This unquoted scalar is single-line only.
+
+multi-line: """
+  This string
   spans many lines.
+  """
 
-double-quoted: "So does this
-  quoted scalar.\n"
+code: """
+  You can add "quotes" and 'quotes' here.
+  Anything goes inside triple-quoted strings.
+  """
 
-single-quoted: 'And so
-  does this'
-
-one-line: This is where \
+folded: """
+  This is where \
   you might think there is a line break \
   but there is no line break here.
-
-bar-prefix: |
-  You can add "quotes" and 'quotes' here.
-  Anything that might cause a problem if the `|` was not present.
+  """
 ```
 
 **Null**
@@ -243,22 +246,23 @@ network:
       - 443 # Site
 ```
 
-A comment must not appear inside a scalar, but it may be associated with a scalar inside of a collection.
-Any comment atop or to the side of a line in a multi-line string is considered to be part of that multi-line string.
+A comment must not appear inside a scalar. Inside triple-quoted strings (`"""`),
+all content — including `#` characters — is literal string content, not comments.
 
-**Example: Multi Line String Non-Comments**
+**Example: Triple-Quoted String With Literal `#`**
 
 ```
-code:
+code: """
   # thread-safe work
   mutex.lock()
   do_work()
   mutex.unlock() # done
+  """
 ```
 
 Comments are allowed as an extension to the object model because they are often critical to
 understanding the purpose of a configuration block, and operations like formatting and linting
-should be supported without destroying of that understanding.
+should be supported without destroying that understanding.
 
 ### Full Length Example
 
@@ -274,9 +278,10 @@ bill-to:
   given: Chris
   family: Dumars
   address:
-    lines:
+    lines: """
       458 Walkman Dr.
       Suite #292
+      """
     city    : Royal Oak
     state   : MI
     postal  : 48046
@@ -292,10 +297,11 @@ product:
   price       : 2392.00
 tax  : 251.42
 total: 4443.52
-comments:
+comments: """
   Late afternoon is best.
   Backup contact is Nancy
   Billsmer @ 338-4338.
+  """
 ```
 
 **Example: Log File**
@@ -307,12 +313,14 @@ Fatal: Unknown variable "bar"
 Stack:
 - file: TopClass.py
   line: 23
-  code: |
+  code: """
     x = MoreObject("345\n")
+    """
 - file: MoreClass.py
   line: 58
-  code: |
+  code: """
     foo = bar
+    """
 ```
 
 ## BNF Grammar
@@ -604,17 +612,11 @@ c-single-quote ::= "'"
 c-double-quote ::= '"'
 ```
 
-"`\`" (`x5C`, backslash) begins an escape sequence in double-quoted scalars,
-and denotes line folding in bare scalars.
+"`\`" (`x5C`, backslash) begins an escape sequence in double-quoted and
+triple-quoted scalars.
 
 ```
 c-escape ::= '\'
-```
-
-"`|`" (`x7C`, vertical bar) denotes a bar-prefix string.
-
-```
-c-bar-prefix ::= '|'
 ```
 
 > **Note:** AYML does not use the following YAML indicators: `?` (explicit
@@ -636,7 +638,6 @@ c-indicator ::=
   | c-single-quote       # "'"
   | c-double-quote       # '"'
   | c-escape             # '\'
-  | c-bar-prefix         # '|'
 ```
 
 Flow indicators are the subset that denote structure in flow collections:
@@ -654,9 +655,8 @@ c-flow-indicator ::=
 ## Escape Sequences
 
 All non-printable characters MUST be _escaped_.
-Escape sequences are only interpreted in double-quoted scalars.
-In all other scalar styles, the "`\`" character has no special meaning
-(except for line folding in bare strings).
+Escape sequences are interpreted in double-quoted and triple-quoted scalars.
+In all other scalar styles, the "`\`" character has no special meaning.
 
 ```
 c-ns-esc-char ::=
@@ -679,6 +679,14 @@ c-ns-esc-char ::=
       | ( 'u' ns-hex-digit{4} )    # 16-bit Unicode
       | ( 'U' ns-hex-digit{8} )    # 32-bit Unicode
     )
+```
+
+Inside triple-quoted strings, a `\` immediately followed by a line break
+suppresses that line break (line continuation). The next line's content is
+joined directly to the current line.
+
+```
+c-escape-break ::= c-escape b-break
 ```
 
 
@@ -719,8 +727,8 @@ A comment is indicated by a `#` character. When a `#` appears preceded by
 whitespace (or at the start of a line) in a non-scalar context, it begins a
 comment that extends to the end of the line.
 
-Inside multi-line scalars (bare strings and bar-prefix strings), `#` is
-treated as literal content, not as a comment indicator.
+Inside triple-quoted strings (`"""`), all content including `#` characters
+is literal string content, not comments.
 
 ```
 c-nb-comment-text ::= c-comment nb-char*
@@ -830,8 +838,7 @@ not a number: nan
 ## Double-Quoted String
 
 A double-quoted string is delimited by `"` characters and supports escape
-sequences. It may span multiple lines; continuation lines are indented to at
-least the current indentation level.
+sequences. Double-quoted strings are single-line only.
 
 ```
 nb-double-char ::=
@@ -844,17 +851,9 @@ nb-double-one-line ::= nb-double-char*
 ```
 
 ```
-s-double-next-line(n) ::=
-    b-break
-    s-indent(n)
-    nb-double-one-line
-```
-
-```
 c-double-quoted(n) ::=
     c-double-quote
     nb-double-one-line
-    s-double-next-line(n)*
     c-double-quote
 ```
 
@@ -863,8 +862,6 @@ c-double-quoted(n) ::=
 ```
 unicode: "Sosa did fine.\u263A"
 control: "\b1998\t1999\t2000\n"
-multi-line: "So does this
-  quoted scalar.\n"
 ```
 
 
@@ -872,7 +869,7 @@ multi-line: "So does this
 
 A single-quoted string is delimited by `'` characters. Single quotes within
 the string are escaped by doubling them (`''`). No other escape sequences are
-recognized. It may span multiple lines.
+recognized. Single-quoted strings are single-line only.
 
 ```
 nb-single-char ::=
@@ -885,17 +882,9 @@ nb-single-one-line ::= nb-single-char*
 ```
 
 ```
-s-single-next-line(n) ::=
-    b-break
-    s-indent(n)
-    nb-single-one-line
-```
-
-```
 c-single-quoted(n) ::=
     c-single-quote
     nb-single-one-line
-    s-single-next-line(n)*
     c-single-quote
 ```
 
@@ -904,30 +893,17 @@ c-single-quoted(n) ::=
 ```
 single: '"Howdy!" he cried.'
 quoted: ' # Not a ''comment''.'
-multi-line: 'And so
-  does this'
 ```
 
 
 ## Bare String
 
 A bare (unquoted) string has no delimiters. Its content is determined by
-context. Bare strings undergo scalar resolution — if the content matches
-`null`, `true`, `false`, an integer, or a float pattern, it is parsed as
-that type rather than as a string.
+context. Bare strings are single-line only. They undergo scalar resolution —
+if the content matches `null`, `true`, `false`, an integer, or a float
+pattern, it is parsed as that type rather than as a string.
 
-On the **first line** of a bare value (the line containing or following the
-mapping value indicator `:`), a `#` preceded by whitespace starts a comment
-and terminates the scalar.
-
-On **continuation lines** (indented beyond the parent indentation), all
-content including `#` characters is literal string content, per the
-multi-line string comment rule.
-
-A `\` at the end of a line folds the next line into the current one — the
-line break and leading whitespace of the continuation line are removed.
-
-Trailing newlines are stripped from multi-line bare strings.
+A `#` preceded by whitespace starts a comment and terminates the scalar.
 
 In a **flow context**, bare strings are additionally terminated by flow
 indicators (`,`, `]`, `}`).
@@ -940,7 +916,7 @@ ns-plain-first-char(c) ::=
 
 ```
 ns-plain-char(BLOCK) ::=
-    ( ns-char - c-comment - c-escape )
+    ( ns-char - c-comment )
   | ( ':' [ lookahead = ns-char ] )          # ':' not followed by space
   | ( [ lookbehind = ns-char ] '#' )         # '#' preceded by non-space
 ```
@@ -951,85 +927,79 @@ ns-plain-char(FLOW) ::=
   - c-flow-indicator
 ```
 
-Single-line bare content:
-
 ```
-ns-bare-one-line(c) ::=
+ns-bare-string(n,c) ::=
     ns-plain-first-char(c)
     ns-plain-char(c)*
 ```
 
-A continuation line within a multi-line bare string. All content is literal,
-including `#` characters:
+**Example:**
 
 ```
-s-bare-continuation-line(n) ::=
-    b-break
-    s-indent(n)
-    nb-char+
+plain: This unquoted scalar is single-line.
+with-colon: This has a colon: inside it.
 ```
 
-A folded line — `\` at end of line joins with the next:
+
+## Triple-Quoted String
+
+A triple-quoted string begins with `"""` followed by a line break, and ends
+with `"""` on its own line. The indentation of the closing `"""` determines
+the whitespace stripping level — that many leading spaces are removed from
+each content line (like Swift's multi-line string literals).
+
+Escape sequences are supported (same as double-quoted strings). A `\` at the
+end of a line suppresses the line break, joining the next line directly to
+the current one.
+
+All content — including `#` characters, quotes, and other indicator
+characters — is literal string content (not comments or structure).
 
 ```
-s-bare-fold(n) ::=
-    c-escape b-break
-    s-indent(n)
+c-triple-quote ::= '"""'
 ```
 
-> **Flag:** The `\` line-folding mechanism is only demonstrated for bare
-> strings in the Language Overview. It is unclear whether `\` folding also
-> applies in bar-prefix strings or single-quoted strings. This grammar
-> restricts line folding to bare strings only.
+```
+nb-triple-char ::=
+    c-ns-esc-char
+  | c-escape-break
+  | ( nb-char - c-escape )
+```
 
 ```
-ns-bare-string(n,c) ::=
-    ns-bare-one-line(c)
-    ( s-bare-fold(n) ns-bare-one-line(c)
-    | s-bare-continuation-line(n)
-    )*
+l-triple-content-line(n) ::=
+    s-indent(n) nb-triple-char*
+```
+
+```
+c-triple-quoted(n) ::=
+    c-triple-quote b-break
+    ( l-triple-content-line(n) b-break )*
+    s-indent(n) c-triple-quote
 ```
 
 **Example:**
 
 ```
-plain:
-  This unquoted scalar
+multi-line: """
+  This string
   spans many lines.
+  """
 
-one-line: This is where \
-  you might think there is a line break \
-  but there is no line break here.
-```
+with-escapes: """
+  Line one\nhas an escape.
+  Line two is normal.
+  """
 
+folded: """
+  This is all \
+  on one line.
+  """
 
-## Bar-Prefix String
-
-A bar-prefix string begins with `|` on the mapping value line, followed by
-indented content on subsequent lines. All content — including quotes, `#`
-characters, and `\` — is literal.
-
-Trailing newlines are stripped from bar-prefix strings.
-
-```
-l-bar-content-line(n) ::=
-    s-indent(n) nb-char+
-```
-
-```
-ns-bar-prefix-string(n) ::=
-    c-bar-prefix
-    b-break
-    l-bar-content-line(n)
-    ( b-break l-bar-content-line(n) )*
-```
-
-**Example:**
-
-```
-bar-prefix: |
+code: """
   You can add "quotes" and 'quotes' here.
-  Anything that might cause a problem if the `|` was not present.
+  x = foo(bar) # this is not a comment
+  """
 ```
 
 
@@ -1044,8 +1014,8 @@ match in this order:
 4. `ns-float`
 5. `ns-bare-string`
 
-A quoted string (`c-double-quoted`, `c-single-quoted`) or bar-prefix string
-(`ns-bar-prefix-string`) is always a string regardless of its content.
+A quoted string (`c-double-quoted`, `c-single-quoted`) or triple-quoted string
+(`c-triple-quoted`) is always a string regardless of its content.
 
 ### Reserved Words
 
@@ -1070,7 +1040,7 @@ such as `2001-01-23` are parsed as strings.
 ns-scalar(n,c) ::=
     c-double-quoted(n)
   | c-single-quoted(n)
-  | ns-bar-prefix-string(n)
+  | c-triple-quoted(n)
   | c-null
   | c-bool
   | ns-integer
@@ -1121,7 +1091,7 @@ by the parser, not expressible in the grammar).
 
 ```
 ns-block-mapping-key(n) ::=
-    ns-bare-one-line(BLOCK)
+    ns-bare-string(n,BLOCK)
   | c-double-quoted(n)
   | c-single-quoted(n)
 ```
