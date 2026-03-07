@@ -12,7 +12,7 @@ It defines the **AYML 1.0 data language**.
 AYML is a software configuration language that looks like YAML and acts like JSON.
 It is meant to be a human-friendly, cross language, Unicode based software
 configuration language. Unlike YAML, it is not designed as a fully featured
-data serialization framework. There are no references types, unordered sets,
+data serialization framework. There are no references, types, unordered sets,
 duplicate nodes, document prefixes, or other complex features supported by YAML.
 
 ## Goals
@@ -361,7 +361,7 @@ A parenthesized term matches its contents.
 
 A concatenation is `term-one term-two`, which matches `term-one` followed by `term-two`.
 
-A alternation is `term-one | term-two`, which matches the `term-one` if possible, or
+An alternation is `term-one | term-two`, which matches the `term-one` if possible, or
 `term-two` otherwise.
 
 A quantified term:
@@ -390,8 +390,8 @@ production alone.
 
 ### Production Parameters
 
-Some productions have parameters in parentheses after the name, such as `c-double-quoted(n)`.
-A parameterized production is shorthand for a (infinite) series of productions,
+Some productions have parameters in parentheses after the name, such as `c-triple-quoted(n)`.
+A parameterized production is shorthand for an (infinite) series of productions,
 each with a fixed value for each parameter.
 
 The parameters are as follows:
@@ -407,7 +407,6 @@ The parameters are as follows:
 To make it easier to follow production combinations, production names use a
 prefix-style naming convention.
 
-* `e-` : A production matching no characters.
 * `c-` : A production starting and ending with a special character.
 * `b-` : A production matching a single line break.
 * `nb-` : A production starting and ending with a non-break character.
@@ -477,16 +476,7 @@ b-break ::=
 
 Line breaks inside scalar content MUST be _normalized_ by the AYML processor.
 Each such line break MUST be parsed into a single line feed character.
-
-```
-b-as-line-feed ::= b-break
-```
-
 Outside scalar content, AYML allows any line break to be used to terminate lines.
-
-```
-b-non-content ::= b-break
-```
 
 
 ## White Space Characters
@@ -535,15 +525,6 @@ A binary digit:
 ```
 ns-bin-digit ::= '0' | '1'
 ```
-
-ASCII letter (alphabetic) characters:
-
-```
-ns-ascii-letter ::=
-    [x41-x5A]            # A-Z
-  | [x61-x7A]            # a-z
-```
-
 
 ## Indicator Characters
 
@@ -612,7 +593,7 @@ c-escape ::= '\'
 
 > **Note:** AYML does not use the following YAML indicators: `?` (explicit
 > mapping key), `&` (anchor), `*` (alias), `!` (tag), `>` (folded scalar),
-> `%` (directive, except `%AYML`), `@`, or `` ` `` (reserved).
+> `%` (directive), `@`, or `` ` `` (reserved).
 
 The union of all indicator characters:
 
@@ -646,7 +627,7 @@ c-flow-indicator ::=
 
 All non-printable characters MUST be _escaped_.
 Escape sequences are interpreted in double-quoted and triple-quoted scalars.
-In all other scalar styles, the "`\`" character has no special meaning.
+In bare strings, the "`\`" character has no special meaning.
 
 ```
 c-ns-esc-char ::=
@@ -708,6 +689,12 @@ A separation in line is one or more white space characters.
 
 ```
 s-separate-in-line ::= s-white+
+```
+
+In flow collections, whitespace includes line breaks:
+
+```
+s-flow-white ::= s-white | b-break
 ```
 
 
@@ -841,7 +828,7 @@ nb-double-one-line ::= nb-double-char*
 ```
 
 ```
-c-double-quoted(n) ::=
+c-double-quoted ::=
     c-double-quote
     nb-double-one-line
     c-double-quote
@@ -868,14 +855,14 @@ In a **flow context**, bare strings are additionally terminated by flow
 indicators (`,`, `]`, `}`).
 
 ```
-ns-plain-first-char(c) ::=
+ns-plain-first-char ::=
     ( ns-char - c-indicator )
   | ( ( '-' | ':' ) [ lookahead = ns-char ] )
 ```
 
 ```
 ns-plain-char(BLOCK) ::=
-    ( ns-char - c-comment )
+    ( ns-char - c-comment - c-mapping-value )
   | ( ':' [ lookahead = ns-char ] )          # ':' not followed by space
   | ( [ lookbehind = ns-char ] '#' )         # '#' preceded by non-space
 ```
@@ -887,16 +874,16 @@ ns-plain-char(FLOW) ::=
 ```
 
 ```
-ns-bare-string(n,c) ::=
-    ns-plain-first-char(c)
-    ns-plain-char(c)*
+ns-bare-string(c) ::=
+    ns-plain-first-char
+    ( s-white* ns-plain-char(c) )*
 ```
 
 **Example:**
 
 ```
 plain: This unquoted scalar is single-line.
-with-colon: This has a colon: inside it.
+url: https://example.com/path
 ```
 
 
@@ -997,13 +984,13 @@ such as `2001-01-23` are parsed as strings.
 
 ```
 ns-scalar(n,c) ::=
-    c-double-quoted(n)
+    c-double-quoted
   | c-triple-quoted(n)
   | c-null
   | c-bool
   | ns-integer
   | ns-float
-  | ns-bare-string(n,c)
+  | ns-bare-string(c)
 ```
 
 
@@ -1023,7 +1010,7 @@ the mapping key, because the `- ` itself provides the required nesting.
 l-block-seq-entry(n) ::=
     s-indent(n)
     c-sequence-entry s-white
-    ns-block-indented-node(n+2,BLOCK)
+    ns-block-node(n+2,BLOCK)
 ```
 
 ```
@@ -1043,18 +1030,24 @@ l-block-sequence(n) ::=
 
 ## Block Mapping
 
-A block mapping is a series of key/value pairs. Keys are single-line scalars.
+A block mapping is a series of key/value pairs.
 A mapping MUST NOT have duplicate keys (this is a semantic constraint enforced
 by the parser, not expressible in the grammar).
 
+A mapping key is any non-null scalar:
+
 ```
-ns-block-mapping-key(n) ::=
-    ns-bare-string(n,BLOCK)
-  | c-double-quoted(n)
+ns-mapping-key(n,c) ::=
+    c-double-quoted
+  | c-triple-quoted(n)
+  | c-bool
+  | ns-integer
+  | ns-float
+  | ns-bare-string(c)
 ```
 
-Mapping keys MUST be single-line scalars. Multi-line mapping keys are not
-supported.
+A mapping key MUST NOT resolve to null. To use the string `"null"` as a key,
+quote it.
 
 A mapping entry. The value may appear on the same line or on subsequent
 lines. When the value is on subsequent lines, it is indented either
@@ -1064,7 +1057,7 @@ sequences that use `- ` as implicit indentation):
 ```
 l-block-mapping-entry(n) ::=
     s-indent(n)
-    ns-block-mapping-key(n)
+    ns-mapping-key(n,BLOCK)
     s-white*
     c-mapping-value
     (
@@ -1103,13 +1096,13 @@ ns-flow-seq-entry(n) ::= ns-flow-node(n,FLOW)
 ```
 c-flow-sequence(n) ::=
     c-sequence-start
-    s-white*
+    s-flow-white*
     (
         ns-flow-seq-entry(n)
-        ( s-white* c-collect-entry s-white* ns-flow-seq-entry(n) )*
-        ( s-white* c-collect-entry )?          # Optional trailing comma
+        ( s-flow-white* c-collect-entry s-flow-white* ns-flow-seq-entry(n) )*
+        ( s-flow-white* c-collect-entry )?     # Optional trailing comma
     )?
-    s-white*
+    s-flow-white*
     c-sequence-end
 ```
 
@@ -1129,23 +1122,23 @@ lines.
 
 ```
 ns-flow-mapping-entry(n) ::=
-    ns-scalar(n,FLOW)
-    s-white*
+    ns-mapping-key(n,FLOW)
+    s-flow-white*
     c-mapping-value
-    s-white*
+    s-flow-white*
     ns-flow-node(n,FLOW)
 ```
 
 ```
 c-flow-mapping(n) ::=
     c-mapping-start
-    s-white*
+    s-flow-white*
     (
         ns-flow-mapping-entry(n)
-        ( s-white* c-collect-entry s-white* ns-flow-mapping-entry(n) )*
-        ( s-white* c-collect-entry )?          # Optional trailing comma
+        ( s-flow-white* c-collect-entry s-flow-white* ns-flow-mapping-entry(n) )*
+        ( s-flow-white* c-collect-entry )?     # Optional trailing comma
     )?
-    s-white*
+    s-flow-white*
     c-mapping-end
 ```
 
@@ -1173,17 +1166,7 @@ ns-flow-node(n,c) ::=
   | c-flow-mapping(n)
 ```
 
-A block-indented node accounts for the content that appears after a block
-sequence entry indicator (`- `):
-
-```
-ns-block-indented-node(n,c) ::=
-    ns-flow-node(n,c)
-  | l-block-sequence(n)
-  | l-block-mapping(n)
-```
-
-A block node is any node that can appear as a block mapping value:
+A block node is a flow node or a block collection:
 
 ```
 ns-block-node(n,c) ::=
@@ -1193,23 +1176,12 @@ ns-block-node(n,c) ::=
 ```
 
 
-## AYML Directive
-
-An AYML document MAY optionally begin with a version directive:
-
-```
-l-ayml-directive ::=
-    "% AYML 1.0" b-break
-```
-
-
 ## Document
 
-An AYML file contains exactly one document. A document is an optional directive, optional leading comments, and a single root node:
+An AYML file contains exactly one document. A document is optional leading comments and a single root node:
 
 ```
 l-ayml-document ::=
-    l-ayml-directive?
     l-comment-block?
     ns-block-node(0,BLOCK)
     b-break?
@@ -1219,7 +1191,6 @@ l-ayml-document ::=
 **Example:**
 
 ```
-%AYML 1.0
 # Server configuration
 host: localhost
 port: 8080
