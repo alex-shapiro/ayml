@@ -329,8 +329,8 @@ Each rule is accompanied by one or more examples.
 Productions are defined using the syntax `production-name ::= term`, where a
 term is either:
 
-An atomic term
-:
+An atomic term:
+
 * A quoted string (`"abc"`), which matches that concatenation of characters. A
   single character is usually written with single quotes (`'a'`).
 * A hexadecimal number (`x0A`), which matches the character at that Unicode
@@ -339,35 +339,35 @@ An atomic term
   whose Unicode code point is within that range.
 * The name of a production (`c-printable`), which matches that production.
 
-A lookaround
-:
+A lookaround:
+
 * `[ lookahead = term ]`, which matches the empty string if `term` would match.
 * `[ lookahead ≠ term ]`, which matches the empty string if `term` would not
   match.
 * `[ lookbehind = term ]`, which matches the empty string if `term` would match
   beginning at any prior point on the line and ending at the current position.
 
-A special production
-:
+A special production:
+
 * `<start-of-line>`, which matches the empty string at the beginning of a line.
 * `<end-of-input>`, matches the empty string at the end of the input.
 * `<empty>`, which (always) matches the empty string.
 
-A parenthesized term
-:
+A parenthesized term:
+
 Matches its contents.
 
 A concatenation
-:
+
 Is `term-one term-two`, which matches `term-one` followed by `term-two`.
 
 A alternation
-:
+
 Is `term-one | term-two`, which matches the `term-one` if possible, or
 `term-two` otherwise.
 
 A quantified term:
-:
+
 * `term?`, which matches `(term | <empty>)`.
 * `term*`, which matches `(term term* | <empty>)`.
 * `term+`, which matches `(term term*)`.
@@ -400,18 +400,10 @@ each with a fixed value for each parameter.
 
 The parameters are as follows:
 
-Indentation: `n`
-:
-The current indentation level. May be any natural number, including zero.
-
-Context: `c`
-:
-Distinguishes between block and flow parsing contexts.
-:
-May be one of:
-:
-* `BLOCK` -- inside a block collection
-* `FLOW` -- inside a flow collection
+* `n` : The current indentation level. May be any natural number, including zero.
+* `c`: Context to distinguish between block and flow parsing. May be one of:
+  * `BLOCK` -- inside a block collection
+  * `FLOW` -- inside a flow collection
 
 
 ### Production Naming Conventions
@@ -419,33 +411,13 @@ May be one of:
 To make it easier to follow production combinations, production names use a
 prefix-style naming convention.
 
-`e-`
-:
-A production matching no characters.
-
-`c-`
-:
-A production starting and ending with a special character.
-
-`b-`
-:
-A production matching a single line break.
-
-`nb-`
-:
-A production starting and ending with a non-break character.
-
-`s-`
-:
-A production starting and ending with a white space character.
-
-`ns-`
-:
-A production starting and ending with a non-space character.
-
-`l-`
-:
-A production matching complete line(s).
+* `e-` : A production matching no characters.
+* `c-` : A production starting and ending with a special character.
+* `b-` : A production matching a single line break.
+* `nb-` : A production starting and ending with a non-break character.
+* `s-` : A production starting and ending with a white space character.
+* `ns-` : A production starting and ending with a non-space character.
+* `l-` : A production matching complete line(s).
 
 
 # Chapter: Character Productions
@@ -454,6 +426,7 @@ A production matching complete line(s).
 
 To ensure readability, AYML uses only the _printable_ subset of the
 Unicode character set.
+
 The allowed character range explicitly excludes the C0 control block
 `x00-x1F` (except for TAB `x09`, LF `x0A`, and CR `x0D` which are allowed),
 DEL `x7F`, the C1 control block `x80-x9F` (except for NEL `x85` which is
@@ -477,23 +450,9 @@ c-printable ::=
 ## Character Encoding
 
 All characters in this specification are Unicode code points.
-Each such code point is written as one or more bytes depending on the
-_character encoding_ used.
+AYML files MUST be encoded in UTF-8. No other encodings are supported.
 
-The character encoding is a presentation detail and MUST NOT be used to
-convey content information.
-
-An AYML processor MUST support the UTF-8 character encoding.
-Support for UTF-16 and UTF-32 is OPTIONAL.
-
-If a character stream begins with a _byte order mark_ (BOM, `xFEFF`), it
-MAY be used to determine the encoding. Otherwise, UTF-8 is assumed.
-
-The recommended output encoding is UTF-8.
-
-```
-c-byte-order-mark ::= xFEFF
-```
+A byte order mark (BOM) MUST NOT appear in an AYML file.
 
 ## Line Break Characters
 
@@ -509,7 +468,7 @@ All other characters, including the form feed (`x0C`), are considered to be
 non-break characters.
 
 ```
-nb-char ::= c-printable - b-char - c-byte-order-mark
+nb-char ::= c-printable - b-char
 ```
 
 Line breaks are interpreted differently by different systems and have multiple
