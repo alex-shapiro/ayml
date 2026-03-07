@@ -33,10 +33,8 @@ interpreted as described in RFC 2119.
 
 ## Language Overview
 
-This section provides a quick glimpse into the expressive power of AYML.
-It is not expected that the first-time reader grok all of the examples.
-Rather, these selections are used as motivation for the remainder of the
-specification.
+This section provides an overview of AYML. 
+The full specification follows in a later section.
 
 ### Collections
 
