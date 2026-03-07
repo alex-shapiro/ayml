@@ -1,4 +1,4 @@
-# AYML version 1.0
+s# AYML version 1.0
 
 **2026-03-06**
 
@@ -222,7 +222,7 @@ optional field: null
 
 #### Comments
 
-A comment is a form of documentation that may be associated with a particular markdown element.
+A comment is a form of documentation that may be associated with a particular AYML element.
 By default, all comments are ignored during deserialization.
 A deserializer may decide to allow comments; if so, a comment may be associated to
 
@@ -252,7 +252,7 @@ should be supported without destroying of that understanding.
 
 ### Full Length Example
 
-Below are two full-length examples of YAML.
+Below are two full-length examples of AYML.
 The first is a sample invoice; the second is a sample log file.
 
 **Example: Invoice**
@@ -270,7 +270,7 @@ bill-to:
     city    : Royal Oak
     state   : MI
     postal  : 48046
-ship-to: same
+ship-to: null
 product:
 - sku         : BL394D
   quantity    : 4
@@ -305,23 +305,15 @@ Stack:
     foo = bar
 ```
 
-# Chapter #. Syntax Conventions
+## BNF Grammar
 
-The following chapters formally define the syntax of YAML character streams,
-using parameterized BNF productions.
-Each BNF production is both named and numbered for easy reference.
+This section defines the BNF grammar for AYML.
 Whenever possible, basic structures are specified before the more complex
 structures using them in a "bottom up" fashion.
 
-The productions are accompanied by examples which are presented in a two-pane
-side-by-side format.
-The left-hand side is the YAML example and the right-hand side is an alternate
-YAML view of the example.
-The right-hand view uses JSON when possible.
-Otherwise it uses a YAML form that is as close to JSON as possible.
+Each rule is accompanied by one or more examples.
 
-
-## #. Production Syntax
+### Production Syntax
 
 Productions are defined using the syntax `production-name ::= term`, where a
 term is either:
