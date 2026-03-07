@@ -177,17 +177,14 @@ not a number: nan
 
 **Strings**
 
-There are three kinds of single-line strings: bare, single-quoted, and double-quoted.
+There are two kinds of single-line strings: bare and double-quoted.
 For multi-line strings, use triple-quoted strings (`"""`).
 
 ```
 unicode: "Sosa did fine.\u263A"
 control: "\b1998\t1999\t2000\n"
 hex esc: "\x0d\x0a is \r\n"
-
-single: '"Howdy!" he cried.'
-quoted: ' # Not a ''comment''.'
-tie-fighter: '|\-*-/|'
+howdy: "\"Howdy!\" he cried."
 ```
 
 Triple-quoted strings (`"""`) are the only multi-line string format. The closing
@@ -600,12 +597,6 @@ c-mapping-end ::= '}'
 c-comment ::= '#'
 ```
 
-"`'`" (`x27`, apostrophe) surrounds a single-quoted scalar.
-
-```
-c-single-quote ::= "'"
-```
-
 "`"`" (`x22`, double quote) surrounds a double-quoted scalar.
 
 ```
@@ -635,7 +626,6 @@ c-indicator ::=
   | c-mapping-start      # '{'
   | c-mapping-end        # '}'
   | c-comment            # '#'
-  | c-single-quote       # "'"
   | c-double-quote       # '"'
   | c-escape             # '\'
 ```
@@ -865,37 +855,6 @@ control: "\b1998\t1999\t2000\n"
 ```
 
 
-## Single-Quoted String
-
-A single-quoted string is delimited by `'` characters. Single quotes within
-the string are escaped by doubling them (`''`). No other escape sequences are
-recognized. Single-quoted strings are single-line only.
-
-```
-nb-single-char ::=
-    "''"                                  # Escaped single quote
-  | ( nb-char - c-single-quote )
-```
-
-```
-nb-single-one-line ::= nb-single-char*
-```
-
-```
-c-single-quoted(n) ::=
-    c-single-quote
-    nb-single-one-line
-    c-single-quote
-```
-
-**Example:**
-
-```
-single: '"Howdy!" he cried.'
-quoted: ' # Not a ''comment''.'
-```
-
-
 ## Bare String
 
 A bare (unquoted) string has no delimiters. Its content is determined by
@@ -1014,7 +973,7 @@ match in this order:
 4. `ns-float`
 5. `ns-bare-string`
 
-A quoted string (`c-double-quoted`, `c-single-quoted`) or triple-quoted string
+A quoted string (`c-double-quoted`) or triple-quoted string
 (`c-triple-quoted`) is always a string regardless of its content.
 
 ### Reserved Words
@@ -1039,7 +998,6 @@ such as `2001-01-23` are parsed as strings.
 ```
 ns-scalar(n,c) ::=
     c-double-quoted(n)
-  | c-single-quoted(n)
   | c-triple-quoted(n)
   | c-null
   | c-bool
@@ -1093,7 +1051,6 @@ by the parser, not expressible in the grammar).
 ns-block-mapping-key(n) ::=
     ns-bare-string(n,BLOCK)
   | c-double-quoted(n)
-  | c-single-quoted(n)
 ```
 
 Mapping keys MUST be single-line scalars. Multi-line mapping keys are not
