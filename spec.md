@@ -19,12 +19,11 @@ duplicate nodes, document prefixes, or other complex features supported by YAML.
 
 The design goals for AYML are, in decreasing priority:
 
-1. AYML should be easily readable by humans
-1. AYML should be portable between programming languages
-1. AYML should match the native data structures of modern languages
-1. AYML should have a consistent model to support generic tools
-1. AYML should support one-pass processing
-1. AYML should be easy to implement and use
+1. AYML should be easy to understand
+1. AYML should be easy to author correctly
+1. AYML should be expressible in the native data structures of modern languages
+1. AYML should be easy to deserialize into strongly typed data structures
+1. AYML should incorporate comments as a formal part of the document structure
 
 ## Terminology
 
@@ -172,8 +171,8 @@ An AYML decoder must support 64-bit floating point numbers, including `inf` and 
 canonical: 1.23015e+3
 exponential: 12.3015e+02
 fixed: 1230.15
-negative infinity: -.inf
-not a number: .nan
+negative infinity: -inf
+not a number: nan
 ```
 
 **Strings**
@@ -386,8 +385,7 @@ production alone.
 
 ### Production Parameters
 
-Some productions have parameters in parentheses after the name, such as
-`c-double-quoted(n)`.
+Some productions have parameters in parentheses after the name, such as `c-double-quoted(n)`.
 A parameterized production is shorthand for a (infinite) series of productions,
 each with a fixed value for each parameter.
 
@@ -417,14 +415,12 @@ prefix-style naming convention.
 
 ## Character Set
 
-To ensure readability, AYML uses only the _printable_ subset of the
-Unicode character set.
+To ensure readability, AYML uses only the printable subset of the Unicode character set.
 
-The allowed character range explicitly excludes the C0 control block
-`x00-x1F` (except for TAB `x09`, LF `x0A`, and CR `x0D` which are allowed),
-DEL `x7F`, the C1 control block `x80-x9F` (except for NEL `x85` which is
-allowed), the surrogate block `xD800-xDFFF`, `xFFFE`, and `xFFFF`.
-
+The allowed character range excludes the C0 control block `x00-x1F` 
+(except for TAB `x09`, LF `x0A`, and CR `x0D` which are allowed),
+DEL `x7F`, the C1 control block `x80-x9F` (except for NEL `x85` which is allowed), 
+the surrogate block `xD800-xDFFF`, `xFFFE`, and `xFFFF`.
 ```
 c-printable ::=
                          # 8 bit
@@ -469,9 +465,9 @@ widely used formats.
 
 ```
 b-break ::=
-    ( b-carriage-return b-line-feed )    # CR LF
-  | b-carriage-return                    # CR
-  | b-line-feed                          # LF
+  ( b-carriage-return b-line-feed )    # CR LF
+  | b-carriage-return                  # CR
+  | b-line-feed                        # LF
 ```
 
 Line breaks inside scalar content MUST be _normalized_ by the AYML processor.
@@ -481,8 +477,7 @@ Each such line break MUST be parsed into a single line feed character.
 b-as-line-feed ::= b-break
 ```
 
-Outside scalar content, AYML allows any line break to be used to terminate
-lines.
+Outside scalar content, AYML allows any line break to be used to terminate lines.
 
 ```
 b-non-content ::= b-break
@@ -816,14 +811,10 @@ ns-float ::=
     ( '-' | '+' )? ns-dec-digit+ '.' ns-dec-digit*
         ( ( 'e' | 'E' ) ( '-' | '+' )? ns-dec-digit+ )?    # Fixed/exponential
   | ( '-' | '+' )? ns-dec-digit+
-        ( 'e' | 'E' ) ( '-' | '+' )? ns-dec-digit+          # Pure exponential
-  | ( '-' | '+' )? ".inf"                                    # Infinity
-  | ".nan"                                                    # Not a number
+        ( 'e' | 'E' ) ( '-' | '+' )? ns-dec-digit+         # Pure exponential
+  | ( '-' | '+' )? "inf"                                   # Infinity
+  | "nan"                                                  # Not a number
 ```
-
-> **Flag:** The Language Overview shows `-.inf` for negative infinity. Is
-> `+.inf` also valid? The grammar above allows it. Also, `.nan` has no sign
-> variant — negative NaN is not meaningful, so the grammar forbids `-.nan`.
 
 **Example:**
 
@@ -831,8 +822,8 @@ ns-float ::=
 canonical: 1.23015e+3
 exponential: 12.3015e+02
 fixed: 1230.15
-negative infinity: -.inf
-not a number: .nan
+negative infinity: -inf
+not a number: nan
 ```
 
 
@@ -1057,9 +1048,24 @@ match in this order:
 A quoted string (`c-double-quoted`, `c-single-quoted`) or bar-prefix string
 (`ns-bar-prefix-string`) is always a string regardless of its content.
 
-> **Note:** This means bare `null`, `true`, and `false` are always their
-> respective types — never strings. To get the string `"null"`, you must
-> quote it: `'null'` or `"null"`.
+### Reserved Words
+
+The following bare words are interpreted as non-string types and MUST be
+quoted to be used as strings:
+
+| Word    | Type  |
+| ------- | ----- |
+| `null`  | null  |
+| `true`  | bool  |
+| `false` | bool  |
+| `inf`   | float |
+| `+inf`  | float |
+| `-inf`  | float |
+| `nan`   | float |
+
+There are no other implicit type conversions.
+Words like `yes`, `no`, `on`, `off`, and date-like strings
+such as `2001-01-23` are parsed as strings.
 
 ```
 ns-scalar(n,c) ::=
