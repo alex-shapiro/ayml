@@ -1332,11 +1332,7 @@ l-ayml-directive ::=
 
 ## Document
 
-An AYML file contains exactly one document. Multiple documents per file are
-not supported.
-
-A document is an optional directive, optional leading comments, and a single
-root node:
+An AYML file contains exactly one document. A document is an optional directive, optional leading comments, and a single root node:
 
 ```
 l-ayml-document ::=
