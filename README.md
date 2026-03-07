@@ -20,4 +20,4 @@ duplicate nodes, document prefixes, or other complex features supported by YAML.
 * `?` indicators
 * directives (except an optional `%AYML 1.0`)
 * document prefixes
-* multiple documents per file
+* mult-document files
