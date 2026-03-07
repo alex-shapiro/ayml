@@ -21,8 +21,8 @@ The design goals for AYML are, in decreasing priority:
 
 1. AYML should be easy to understand
 1. AYML should be easy to author correctly
-1. AYML should be expressible in the native data structures of modern languages
 1. AYML should be easy to deserialize into strongly typed data structures
+1. AYML should be expressible in the native data structures of modern languages
 1. AYML should incorporate comments as a formal part of the document structure
 
 ## Terminology
