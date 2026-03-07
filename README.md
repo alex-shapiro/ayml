@@ -10,15 +10,14 @@ duplicate nodes, document prefixes, or other complex features supported by YAML.
 
 ## Explicit Nongoals
 
-* bool value must be true or false (not YES/NO, avoid Norway problem)
-* no tags
-* no structures (anchors, aliases, `---` separators)
-* no unordered Sets
-* no duplicate keys
-* no JSON compatibility quirks
-* no empty nodes
-* no `?` indicators
-* no directives except one: `%AYML 1.0` (this directive is optional
-* no document prefixes
+* YES/NO for booleans
+* tags
+* structures (anchors, aliases, `---` separators)
+* unordered Sets
+* duplicate keys
+* JSON compatibility quirks
+* empty nodes
+* `?` indicators
+* directives (except an optional `%AYML 1.0`)
+* document prefixes
 * multiple documents per file
-* ...etc
