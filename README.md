@@ -1,9 +1,23 @@
 # AYML
 
-Simplified YAML variant built for [Ash](https://ashell.dev). Based on YAML 1.2.2 but with
+Simplified YAML variant built for [Ash](https://ashell.dev)
 
-* no tags
-* no aliases
-* no blocks
+AYML is a software configuration language that looks like YAML and acts like JSON.
+It is meant to be a human-friendly, cross language, Unicode based software
+configuration language. Unlike YAML, it is not designed as a fully featured
+data serialization framework. There are no references types, unordered sets,
+duplicate nodes, document prefixes, or other complex features supported by YAML.
 
-My goal is to emulate the experience of JSON but without quotes or curly braces.
+## Explicit Nongoals
+
+* YES/NO for booleans
+* tags
+* structures (anchors, aliases, `---` separators)
+* unordered sets
+* duplicate keys
+* JSON compatibility quirks
+* empty nodes
+* `?` indicators
+* directives
+* document prefixes
+* mult-document files
