@@ -224,7 +224,7 @@ optional field: null
 
 A comment is a form of documentation that may be associated with a particular AYML element.
 By default, all comments are ignored during deserialization.
-A deserializer may decide to allow comments; if so, a comment may be associated to
+A deserializer may decide to allow comments; if so, a comment may be associated to:
 
 * the node below it, if the comment is on its own line
 * the node it follows, if the comment follows a node
@@ -245,6 +245,17 @@ network:
 ```
 
 A comment must not appear inside a scalar, but it may be associated with a scalar inside of a collection.
+Any comment atop or to the side of a line in a multi-line string is considered to be part of that multi-line string.
+
+**Example: Multi Line String Non-Comments**
+
+```
+code:
+  # thread-safe work
+  mutex.lock()
+  do_work()
+  mutex.unlock() # done
+```
 
 Comments are allowed as an extension to the object model because they are often critical to
 understanding the purpose of a configuration block, and operations like formatting and linting
