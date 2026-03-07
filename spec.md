@@ -353,17 +353,11 @@ A special production:
 * `<end-of-input>`, matches the empty string at the end of the input.
 * `<empty>`, which (always) matches the empty string.
 
-A parenthesized term:
+A parenthesized term matches its contents.
 
-Matches its contents.
+A concatenation is `term-one term-two`, which matches `term-one` followed by `term-two`.
 
-A concatenation
-
-Is `term-one term-two`, which matches `term-one` followed by `term-two`.
-
-A alternation
-
-Is `term-one | term-two`, which matches the `term-one` if possible, or
+A alternation is `term-one | term-two`, which matches the `term-one` if possible, or
 `term-two` otherwise.
 
 A quantified term:
@@ -374,10 +368,9 @@ A quantified term:
 
 > Note: Quantified terms are always greedy.
 
-The order of precedence is parenthesization, then quantification, then
-concatenation, then alternation.
+The order of precedence is parenthesization, then quantification, then concatenation, then alternation.
 
-Some lines in a production definition might have a comment like:
+Some lines in a production definition may have a comment like:
 
 ```
 production-a ::=
