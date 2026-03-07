@@ -185,7 +185,7 @@ howdy: "\"Howdy!\" he cried."
 ```
 
 Triple-quoted strings (`"""`) are the only multi-line string format. The closing
-`"""` indentation determines whitespace stripping (like Swift). Escape sequences
+`"""` indentation determines whitespace stripping. Escape sequences
 are supported. A `\` at the end of a line suppresses the line break.
 
 ```
