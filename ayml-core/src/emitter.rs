@@ -129,21 +129,8 @@ fn emit_compact_mapping(
     map: &std::collections::HashMap<MapKey, Node>,
     indent: usize,
 ) {
-    // Emit scalar-valued keys first, then collection-valued keys last,
-    // because a collection value's block content at the same indent makes
-    // subsequent sibling keys unparseable if they follow.
-    let mut scalars: Vec<_> = Vec::new();
-    let mut collections: Vec<_> = Vec::new();
-    for (key, value_node) in map {
-        if value_node.value.is_collection() {
-            collections.push((key, value_node));
-        } else {
-            scalars.push((key, value_node));
-        }
-    }
-
     let mut first = true;
-    for (key, value_node) in scalars.into_iter().chain(collections) {
+    for (key, value_node) in map {
         if !first {
             if !out.ends_with('\n') {
                 out.push('\n');

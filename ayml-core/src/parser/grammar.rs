@@ -846,7 +846,16 @@ impl<'a> Parser<'a> {
 
         // Check for additional mapping entries on subsequent lines
         loop {
-            if !self.scanner.eat_break() && !self.scanner.is_eof() {
+            if !self.scanner.is_eof() && !self.scanner.eat_break() {
+                // Collection value may have already consumed the line break.
+                // Check if we're at the right indent to continue.
+                let spaces = self.scanner.count_spaces();
+                if spaces != n {
+                    break;
+                }
+                // Fall through — we're already at a valid line start
+            }
+            if self.scanner.is_eof() {
                 break;
             }
             let comment = self.skip_block_gaps(n);
