@@ -7,3 +7,7 @@
 # c library
 - name: c
   version: 3.0
+  rules:
+  - 1
+  - 2
+  - 3
