@@ -376,97 +376,12 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // Strip `closing_indent` leading spaces from each line, then process
-        // escape sequences.
-        let mut result = String::new();
-        for (i, line) in raw_lines.iter().enumerate() {
-            if i > 0 {
-                result.push('\n');
-            }
-
-            // Strip leading spaces (up to closing_indent)
-            let stripped = if line.len() >= closing_indent
-                && line[..closing_indent].chars().all(|c| c == ' ')
-            {
-                &line[closing_indent..]
-            } else if line.trim().is_empty() {
-                // Blank lines are preserved as empty
-                ""
-            } else {
-                line
-            };
-
-            // Process escape sequences within the stripped content
-            let mut chars = stripped.chars().peekable();
-            while let Some(ch) = chars.next() {
-                if ch == '\\' {
-                    // Check for line continuation: `\` at end of content
-                    if chars.peek().is_none() {
-                        // `\` at end of line — suppress the upcoming newline
-                        // Remove the newline we'll add in the next iteration
-                        // by setting a flag... actually, we handle this by
-                        // checking if this is the last char of the line
-                        // The next iteration's newline push should be skipped.
-                        // Simple approach: mark that next newline is suppressed.
-                        if i + 1 < raw_lines.len() {
-                            // The newline between this line and next is suppressed
-                            // We'll handle this by not pushing `\n` at the start
-                            // of the next iteration. We need a different approach.
-                        }
-                        // For now, store a sentinel and post-process
-                        result.push('\x00'); // sentinel for line continuation
-                        continue;
-                    }
-
-                    // Normal escape — use a mini inline parser
-                    match chars.next() {
-                        Some('0') => result.push('\0'),
-                        Some('a') => result.push('\x07'),
-                        Some('b') => result.push('\x08'),
-                        Some('t') => result.push('\t'),
-                        Some('n') => result.push('\n'),
-                        Some('v') => result.push('\x0B'),
-                        Some('f') => result.push('\x0C'),
-                        Some('r') => result.push('\r'),
-                        Some('e') => result.push('\x1B'),
-                        Some(' ') => result.push(' '),
-                        Some('"') => result.push('"'),
-                        Some('/') => result.push('/'),
-                        Some('\\') => result.push('\\'),
-                        Some('x') => {
-                            let hex = Self::take_hex(&mut chars, 2)?;
-                            result.push(hex);
-                        }
-                        Some('u') => {
-                            let hex = Self::take_hex(&mut chars, 4)?;
-                            result.push(hex);
-                        }
-                        Some('U') => {
-                            let hex = Self::take_hex(&mut chars, 8)?;
-                            result.push(hex);
-                        }
-                        Some(c) => {
-                            return Err(Error::new(
-                                ErrorKind::InvalidEscape(format!("\\{c}")),
-                                Span::point(start),
-                                self.scanner.source(),
-                            ));
-                        }
-                        None => {
-                            // `\` at end of chars but we already handled the
-                            // end-of-line case above; this shouldn't happen
-                            result.push('\\');
-                        }
-                    }
-                } else {
-                    result.push(ch);
-                }
-            }
-        }
-
-        // Post-process: replace sentinel `\0` + `\n` pairs for line continuation
-        let result = result.replace("\x00\n", "");
-
+        let result = Self::process_triple_quoted_lines(
+            &raw_lines,
+            closing_indent,
+            start,
+            self.scanner.source(),
+        )?;
         Ok(Node::new(Value::Str(result)))
     }
 
@@ -497,6 +412,81 @@ impl<'a> Parser<'a> {
                 "",
             )
         })
+    }
+
+    /// Process raw lines from a triple-quoted string: strip indentation and
+    /// handle escape sequences.
+    fn process_triple_quoted_lines(
+        raw_lines: &[String],
+        closing_indent: usize,
+        start: usize,
+        source: &str,
+    ) -> Result<String, Error> {
+        let mut result = String::new();
+        for (i, line) in raw_lines.iter().enumerate() {
+            if i > 0 {
+                result.push('\n');
+            }
+
+            let stripped = if line.len() >= closing_indent
+                && line[..closing_indent].chars().all(|c| c == ' ')
+            {
+                &line[closing_indent..]
+            } else if line.trim().is_empty() {
+                ""
+            } else {
+                line
+            };
+
+            let mut chars = stripped.chars().peekable();
+            while let Some(ch) = chars.next() {
+                if ch == '\\' {
+                    if chars.peek().is_none() {
+                        result.push('\x00'); // sentinel for line continuation
+                        continue;
+                    }
+                    Self::process_escape_char(&mut chars, &mut result, start, source)?;
+                } else {
+                    result.push(ch);
+                }
+            }
+        }
+        Ok(result.replace("\x00\n", ""))
+    }
+
+    /// Process a single escape character from an iterator (after consuming the backslash).
+    fn process_escape_char(
+        chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+        result: &mut String,
+        start: usize,
+        source: &str,
+    ) -> Result<(), Error> {
+        match chars.next() {
+            Some('0') => result.push('\0'),
+            Some('a') => result.push('\x07'),
+            Some('b') => result.push('\x08'),
+            Some('t') => result.push('\t'),
+            Some('n') => result.push('\n'),
+            Some('v') => result.push('\x0B'),
+            Some('f') => result.push('\x0C'),
+            Some('r') => result.push('\r'),
+            Some('e') => result.push('\x1B'),
+            Some(' ') => result.push(' '),
+            Some('"') => result.push('"'),
+            Some('/') => result.push('/'),
+            Some('\\') | None => result.push('\\'),
+            Some('x') => result.push(Self::take_hex(chars, 2)?),
+            Some('u') => result.push(Self::take_hex(chars, 4)?),
+            Some('U') => result.push(Self::take_hex(chars, 8)?),
+            Some(c) => {
+                return Err(Error::new(
+                    ErrorKind::InvalidEscape(format!("\\{c}")),
+                    Span::point(start),
+                    source,
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// Parse a bare (unquoted) scalar with type resolution.
@@ -868,9 +858,7 @@ impl<'a> Parser<'a> {
             let entry_saved = self.scanner.offset;
             self.scanner.eat_spaces(n);
 
-            let next_raw = if let Ok(Some(k)) = self.try_parse_mapping_key(Context::Block) {
-                k
-            } else {
+            let Ok(Some(next_raw)) = self.try_parse_mapping_key(Context::Block) else {
                 self.scanner.offset = entry_saved;
                 break;
             };

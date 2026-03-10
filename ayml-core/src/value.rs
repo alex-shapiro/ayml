@@ -19,7 +19,7 @@ pub struct Node {
 
 impl Node {
     /// Create a node with no comments.
-    #[must_use] 
+    #[must_use]
     pub const fn new(value: Value) -> Self {
         Self {
             comment: None,
@@ -72,22 +72,22 @@ pub enum Value {
 }
 
 impl Value {
-    #[must_use] 
+    #[must_use]
     pub const fn is_null(&self) -> bool {
         matches!(self, Self::Null)
     }
 
-    #[must_use] 
+    #[must_use]
     pub const fn is_scalar(&self) -> bool {
         !matches!(self, Self::Seq(_) | Self::Map(_))
     }
 
-    #[must_use] 
+    #[must_use]
     pub const fn is_collection(&self) -> bool {
         matches!(self, Self::Seq(_) | Self::Map(_))
     }
 
-    #[must_use] 
+    #[must_use]
     pub const fn as_bool(&self) -> Option<bool> {
         match self {
             Self::Bool(b) => Some(*b),
@@ -95,7 +95,7 @@ impl Value {
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub const fn as_i64(&self) -> Option<i64> {
         match self {
             Self::Int(i) => Some(*i),
@@ -103,7 +103,7 @@ impl Value {
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub const fn as_f64(&self) -> Option<f64> {
         match self {
             Self::Float(f) => Some(*f),
@@ -111,7 +111,7 @@ impl Value {
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn as_str(&self) -> Option<&str> {
         match self {
             Self::Str(s) => Some(s),
@@ -119,7 +119,7 @@ impl Value {
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn as_sequence(&self) -> Option<&[Node]> {
         match self {
             Self::Seq(s) => Some(s),
@@ -127,7 +127,7 @@ impl Value {
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub const fn as_mapping(&self) -> Option<&HashMap<MapKey, Node>> {
         match self {
             Self::Map(m) => Some(m),

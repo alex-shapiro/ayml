@@ -10,12 +10,12 @@ pub struct Span {
 }
 
 impl Span {
-    #[must_use] 
+    #[must_use]
     pub const fn new(start: usize, end: usize) -> Self {
         Self { start, end }
     }
 
-    #[must_use] 
+    #[must_use]
     pub const fn point(offset: usize) -> Self {
         Self {
             start: offset,
@@ -64,7 +64,7 @@ pub struct Error {
 
 impl Error {
     /// Create an error and compute line/column from the source input.
-    #[must_use] 
+    #[must_use]
     pub fn new(kind: ErrorKind, span: Span, source: &str) -> Self {
         let (line, column) = offset_to_line_col(source, span.start);
         Self {

@@ -45,22 +45,7 @@ fn emit_node(out: &mut String, node: &Node, indent: usize, top_level: bool) {
             if top_level {
                 emit_indent(out, indent);
             }
-            if f.is_nan() {
-                out.push_str("nan");
-            } else if f.is_infinite() {
-                if f.is_sign_negative() {
-                    out.push_str("-inf");
-                } else {
-                    out.push_str("inf");
-                }
-            } else {
-                let s = format!("{f}");
-                out.push_str(&s);
-                // Ensure there's a dot so it doesn't look like an int
-                if !s.contains('.') && !s.contains('e') && !s.contains('E') {
-                    out.push_str(".0");
-                }
-            }
+            emit_float(out, *f);
         }
         Value::Str(s) => {
             if top_level {
@@ -68,68 +53,82 @@ fn emit_node(out: &mut String, node: &Node, indent: usize, top_level: bool) {
             }
             emit_string(out, s, indent);
         }
-        Value::Seq(entries) => {
-            for (i, entry) in entries.iter().enumerate() {
-                if i > 0 {
-                    out.push('\n');
-                }
-                // Entry comment
-                if let Some(ref comment) = entry.comment {
-                    for line in comment.lines() {
-                        let _ = writeln!(out, "# {line}");
-                    }
-                }
+        Value::Seq(entries) => emit_sequence(out, entries, indent),
+        Value::Map(map) => emit_mapping(out, map, indent),
+    }
+}
+
+fn emit_float(out: &mut String, f: f64) {
+    if f.is_nan() {
+        out.push_str("nan");
+    } else if f.is_infinite() {
+        out.push_str(if f.is_sign_negative() { "-inf" } else { "inf" });
+    } else {
+        let s = format!("{f}");
+        out.push_str(&s);
+        if !s.contains('.') && !s.contains('e') && !s.contains('E') {
+            out.push_str(".0");
+        }
+    }
+}
+
+fn emit_sequence(out: &mut String, entries: &[Node], indent: usize) {
+    for (i, entry) in entries.iter().enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        if let Some(ref comment) = entry.comment {
+            for line in comment.lines() {
+                let _ = writeln!(out, "# {line}");
+            }
+        }
+        emit_indent(out, indent);
+        out.push_str("- ");
+        emit_seq_entry_value(out, entry, indent + 2);
+        if let Some(ref ic) = entry.inline_comment {
+            out.push_str(" # ");
+            out.push_str(ic);
+        }
+        out.push('\n');
+    }
+}
+
+fn emit_mapping(out: &mut String, map: &std::collections::HashMap<MapKey, Node>, indent: usize) {
+    let mut first = true;
+    for (key, value_node) in map {
+        if !first {
+            out.push('\n');
+        }
+        first = false;
+
+        if let Some(ref comment) = value_node.comment {
+            for line in comment.lines() {
                 emit_indent(out, indent);
-                out.push_str("- ");
-                emit_seq_entry_value(out, entry, indent + 2);
-                // Inline comment
-                if let Some(ref ic) = entry.inline_comment {
-                    out.push_str(" # ");
-                    out.push_str(ic);
-                }
+                out.push_str("# ");
+                out.push_str(line);
                 out.push('\n');
             }
         }
-        Value::Map(map) => {
-            let mut first = true;
-            for (key, value_node) in map {
-                if !first {
-                    out.push('\n');
-                }
-                first = false;
 
-                // Entry comment
-                if let Some(ref comment) = value_node.comment {
-                    for line in comment.lines() {
-                        emit_indent(out, indent);
-                        out.push_str("# ");
-                        out.push_str(line);
-                        out.push('\n');
-                    }
-                }
+        emit_indent(out, indent);
+        emit_map_key(out, key);
+        out.push(':');
 
-                emit_indent(out, indent);
-                emit_map_key(out, key);
-                out.push(':');
+        if value_node.value.is_collection() {
+            out.push('\n');
+            emit_node(out, &Node::new(value_node.value.clone()), indent, true);
+        } else {
+            out.push(' ');
+            emit_node(out, &Node::new(value_node.value.clone()), indent, false);
+        }
 
-                if value_node.value.is_collection() {
-                    out.push('\n');
-                    emit_node(out, &Node::new(value_node.value.clone()), indent, true);
-                } else {
-                    out.push(' ');
-                    emit_node(out, &Node::new(value_node.value.clone()), indent, false);
-                }
+        if let Some(ref ic) = value_node.inline_comment {
+            out.push_str(" # ");
+            out.push_str(ic);
+        }
 
-                // Inline comment
-                if let Some(ref ic) = value_node.inline_comment {
-                    out.push_str(" # ");
-                    out.push_str(ic);
-                }
-
-                if !value_node.value.is_collection() {
-                    out.push('\n');
-                }
-            }
+        if !value_node.value.is_collection() {
+            out.push('\n');
         }
     }
 }
