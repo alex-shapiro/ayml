@@ -5,7 +5,8 @@ use std::fmt::Write as _;
 #[must_use]
 pub fn emit(node: &Node) -> String {
     let mut out = String::new();
-    emit_node(&mut out, node, 0, true);
+    emit_comment(&mut out, node.comment.as_deref(), 0);
+    emit_value(&mut out, &node.value, 0, true);
     // Ensure trailing newline
     if !out.ends_with('\n') {
         out.push('\n');
@@ -13,16 +14,17 @@ pub fn emit(node: &Node) -> String {
     out
 }
 
-fn emit_node(out: &mut String, node: &Node, indent: usize, top_level: bool) {
-    // Top comment
-    if let Some(ref comment) = node.comment {
+fn emit_comment(out: &mut String, comment: Option<&str>, indent: usize) {
+    if let Some(comment) = comment {
         for line in comment.lines() {
             emit_indent(out, indent);
             let _ = writeln!(out, "# {line}");
         }
     }
+}
 
-    match &node.value {
+fn emit_value(out: &mut String, value: &Value, indent: usize, top_level: bool) {
+    match value {
         Value::Null => {
             if top_level {
                 emit_indent(out, indent);
@@ -77,18 +79,11 @@ fn emit_sequence(out: &mut String, entries: &[Node], indent: usize) {
         if i > 0 {
             out.push('\n');
         }
-        if let Some(ref comment) = entry.comment {
-            for line in comment.lines() {
-                let _ = writeln!(out, "# {line}");
-            }
-        }
+        emit_comment(out, entry.comment.as_deref(), indent);
         emit_indent(out, indent);
         out.push_str("- ");
         emit_seq_entry_value(out, entry, indent + 2);
-        if let Some(ref ic) = entry.inline_comment {
-            out.push_str(" # ");
-            out.push_str(ic);
-        }
+        emit_inline_comment(out, entry.inline_comment.as_deref());
         out.push('\n');
     }
 }
@@ -101,14 +96,7 @@ fn emit_mapping(out: &mut String, map: &std::collections::HashMap<MapKey, Node>,
         }
         first = false;
 
-        if let Some(ref comment) = value_node.comment {
-            for line in comment.lines() {
-                emit_indent(out, indent);
-                out.push_str("# ");
-                out.push_str(line);
-                out.push('\n');
-            }
-        }
+        emit_comment(out, value_node.comment.as_deref(), indent);
 
         emit_indent(out, indent);
         emit_map_key(out, key);
@@ -116,16 +104,13 @@ fn emit_mapping(out: &mut String, map: &std::collections::HashMap<MapKey, Node>,
 
         if value_node.value.is_collection() {
             out.push('\n');
-            emit_node(out, &Node::new(value_node.value.clone()), indent, true);
+            emit_value(out, &value_node.value, indent, true);
         } else {
             out.push(' ');
-            emit_node(out, &Node::new(value_node.value.clone()), indent, false);
+            emit_value(out, &value_node.value, indent, false);
         }
 
-        if let Some(ref ic) = value_node.inline_comment {
-            out.push_str(" # ");
-            out.push_str(ic);
-        }
+        emit_inline_comment(out, value_node.inline_comment.as_deref());
 
         if !value_node.value.is_collection() {
             out.push('\n');
@@ -133,42 +118,43 @@ fn emit_mapping(out: &mut String, map: &std::collections::HashMap<MapKey, Node>,
     }
 }
 
-fn emit_seq_entry_value(out: &mut String, node: &Node, indent: usize) {
-    match &node.value {
-        Value::Map(_) => {
-            // Compact mapping notation
-            emit_compact_mapping(out, node, indent);
-        }
-        Value::Seq(_) => {
-            // Nested sequence — use flow style for simplicity
-            emit_flow_value(out, &node.value);
-        }
-        _ => {
-            emit_node(out, &Node::new(node.value.clone()), indent, false);
-        }
+fn emit_inline_comment(out: &mut String, comment: Option<&str>) {
+    if let Some(ic) = comment {
+        out.push_str(" # ");
+        out.push_str(ic);
     }
 }
 
-fn emit_compact_mapping(out: &mut String, node: &Node, indent: usize) {
-    if let Value::Map(ref map) = node.value {
-        let mut first = true;
-        for (key, value_node) in map {
-            if !first {
-                out.push('\n');
-                emit_indent(out, indent);
-            }
-            first = false;
+fn emit_seq_entry_value(out: &mut String, node: &Node, indent: usize) {
+    match &node.value {
+        Value::Map(map) => emit_compact_mapping(out, map, indent),
+        Value::Seq(_) => emit_flow_value(out, &node.value),
+        _ => emit_value(out, &node.value, indent, false),
+    }
+}
 
-            emit_map_key(out, key);
-            out.push(':');
+fn emit_compact_mapping(
+    out: &mut String,
+    map: &std::collections::HashMap<MapKey, Node>,
+    indent: usize,
+) {
+    let mut first = true;
+    for (key, value_node) in map {
+        if !first {
+            out.push('\n');
+            emit_indent(out, indent);
+        }
+        first = false;
 
-            if value_node.value.is_collection() {
-                out.push('\n');
-                emit_node(out, &Node::new(value_node.value.clone()), indent, true);
-            } else {
-                out.push(' ');
-                emit_node(out, &Node::new(value_node.value.clone()), indent, false);
-            }
+        emit_map_key(out, key);
+        out.push(':');
+
+        if value_node.value.is_collection() {
+            out.push('\n');
+            emit_value(out, &value_node.value, indent, true);
+        } else {
+            out.push(' ');
+            emit_value(out, &value_node.value, indent, false);
         }
     }
 }
