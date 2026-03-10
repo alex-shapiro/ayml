@@ -64,13 +64,13 @@ fn emit_node(out: &mut String, node: &Node, indent: usize, top_level: bool) {
                 }
             }
         }
-        Value::String(s) => {
+        Value::Str(s) => {
             if top_level {
                 emit_indent(out, indent);
             }
             emit_string(out, s, indent);
         }
-        Value::Sequence(entries) => {
+        Value::Seq(entries) => {
             for (i, entry) in entries.iter().enumerate() {
                 if i > 0 {
                     out.push('\n');
@@ -95,7 +95,7 @@ fn emit_node(out: &mut String, node: &Node, indent: usize, top_level: bool) {
                 out.push('\n');
             }
         }
-        Value::Mapping(map) => {
+        Value::Map(map) => {
             let mut first = true;
             for (key, value_node) in map {
                 if !first {
@@ -141,11 +141,11 @@ fn emit_node(out: &mut String, node: &Node, indent: usize, top_level: bool) {
 
 fn emit_seq_entry_value(out: &mut String, node: &Node, indent: usize) {
     match &node.value {
-        Value::Mapping(_) => {
+        Value::Map(_) => {
             // Compact mapping notation
             emit_compact_mapping(out, node, indent);
         }
-        Value::Sequence(_) => {
+        Value::Seq(_) => {
             // Nested sequence — use flow style for simplicity
             emit_flow_value(out, &node.value);
         }
@@ -156,7 +156,7 @@ fn emit_seq_entry_value(out: &mut String, node: &Node, indent: usize) {
 }
 
 fn emit_compact_mapping(out: &mut String, node: &Node, indent: usize) {
-    if let Value::Mapping(ref map) = node.value {
+    if let Value::Map(ref map) = node.value {
         let mut first = true;
         for (key, value_node) in map {
             if !first {
@@ -193,7 +193,7 @@ fn emit_flow_value(out: &mut String, value: &Value) {
                 out.push_str(&format!("{f}"));
             }
         }
-        Value::String(s) => {
+        Value::Str(s) => {
             out.push('"');
             for ch in s.chars() {
                 match ch {
@@ -210,7 +210,7 @@ fn emit_flow_value(out: &mut String, value: &Value) {
             }
             out.push('"');
         }
-        Value::Sequence(entries) => {
+        Value::Seq(entries) => {
             out.push('[');
             for (i, entry) in entries.iter().enumerate() {
                 if i > 0 {
@@ -220,7 +220,7 @@ fn emit_flow_value(out: &mut String, value: &Value) {
             }
             out.push(']');
         }
-        Value::Mapping(map) => {
+        Value::Map(map) => {
             out.push('{');
             let mut first = true;
             for (key, value_node) in map {

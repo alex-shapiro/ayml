@@ -43,7 +43,7 @@ comments: \"\"\"
     );
     assert_eq!(
         map[&MapKey::String("date".into())].value,
-        Value::String("2001-01-23".into())
+        Value::Str("2001-01-23".into())
     );
     assert!(map[&MapKey::String("ship-to".into())].value.is_null());
     assert_eq!(
@@ -62,7 +62,7 @@ comments: \"\"\"
         .unwrap();
     assert_eq!(
         bill_to[&MapKey::String("given".into())].value,
-        Value::String("Chris".into())
+        Value::Str("Chris".into())
     );
 
     // address
@@ -78,7 +78,7 @@ comments: \"\"\"
     assert!(lines.contains("Suite #292"));
     assert_eq!(
         address[&MapKey::String("city".into())].value,
-        Value::String("Royal Oak".into())
+        Value::Str("Royal Oak".into())
     );
     assert_eq!(
         address[&MapKey::String("postal".into())].value,
@@ -94,7 +94,7 @@ comments: \"\"\"
     let p0 = products[0].value.as_mapping().unwrap();
     assert_eq!(
         p0[&MapKey::String("sku".into())].value,
-        Value::String("BL394D".into())
+        Value::Str("BL394D".into())
     );
     assert_eq!(p0[&MapKey::String("quantity".into())].value, Value::Int(4));
     assert_eq!(
@@ -132,7 +132,7 @@ Stack:
 
     assert_eq!(
         map[&MapKey::String("User".into())].value,
-        Value::String("ed".into())
+        Value::Str("ed".into())
     );
 
     let stack = map[&MapKey::String("Stack".into())]
@@ -144,7 +144,7 @@ Stack:
     let s0 = stack[0].value.as_mapping().unwrap();
     assert_eq!(
         s0[&MapKey::String("file".into())].value,
-        Value::String("TopClass.py".into())
+        Value::Str("TopClass.py".into())
     );
     assert_eq!(s0[&MapKey::String("line".into())].value, Value::Int(23));
 
@@ -217,14 +217,14 @@ rbi:
         .as_sequence()
         .unwrap();
     assert_eq!(hr.len(), 2);
-    assert_eq!(hr[0].value, Value::String("Mark McGwire".into()));
+    assert_eq!(hr[0].value, Value::Str("Mark McGwire".into()));
 
     let rbi = map[&MapKey::String("rbi".into())]
         .value
         .as_sequence()
         .unwrap();
     assert_eq!(rbi.len(), 2);
-    assert_eq!(rbi[0].value, Value::String("Sammy Sosa".into()));
+    assert_eq!(rbi[0].value, Value::Str("Sammy Sosa".into()));
 }
 
 #[test]
@@ -257,7 +257,7 @@ network:
     let rule0 = rules[0].value.as_mapping().unwrap();
     assert_eq!(
         rule0[&MapKey::String("host".into())].value,
-        Value::String("github.com".into())
+        Value::Str("github.com".into())
     );
 
     let ports = rule0[&MapKey::String("ports".into())]

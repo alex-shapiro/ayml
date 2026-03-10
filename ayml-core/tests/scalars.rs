@@ -177,7 +177,7 @@ fn bare_string_simple() {
     let map = node.value.as_mapping().unwrap();
     assert_eq!(
         map[&MapKey::String("name".into())].value,
-        Value::String("Mark McGwire".into())
+        Value::Str("Mark McGwire".into())
     );
 }
 
@@ -187,7 +187,7 @@ fn bare_string_with_url() {
     let map = node.value.as_mapping().unwrap();
     assert_eq!(
         map[&MapKey::String("url".into())].value,
-        Value::String("https://example.com/path".into())
+        Value::Str("https://example.com/path".into())
     );
 }
 
@@ -198,7 +198,7 @@ fn bare_string_date_is_string() {
     let map = node.value.as_mapping().unwrap();
     assert_eq!(
         map[&MapKey::String("date".into())].value,
-        Value::String("2001-01-23".into())
+        Value::Str("2001-01-23".into())
     );
 }
 
@@ -208,7 +208,7 @@ fn bare_string_yes_is_string() {
     let map = node.value.as_mapping().unwrap();
     assert_eq!(
         map[&MapKey::String("answer".into())].value,
-        Value::String("yes".into())
+        Value::Str("yes".into())
     );
 }
 
@@ -218,7 +218,7 @@ fn bare_string_no_is_string() {
     let map = node.value.as_mapping().unwrap();
     assert_eq!(
         map[&MapKey::String("answer".into())].value,
-        Value::String("no".into())
+        Value::Str("no".into())
     );
 }
 
@@ -230,7 +230,7 @@ fn double_quoted_simple() {
     let map = node.value.as_mapping().unwrap();
     assert_eq!(
         map[&MapKey::String("s".into())].value,
-        Value::String("hello world".into())
+        Value::Str("hello world".into())
     );
 }
 
@@ -240,7 +240,7 @@ fn double_quoted_escapes() {
     let map = node.value.as_mapping().unwrap();
     assert_eq!(
         map[&MapKey::String("s".into())].value,
-        Value::String("\t\n\r\\\"/".into())
+        Value::Str("\t\n\r\\\"/".into())
     );
 }
 
@@ -250,7 +250,7 @@ fn double_quoted_unicode_escape() {
     let map = node.value.as_mapping().unwrap();
     assert_eq!(
         map[&MapKey::String("s".into())].value,
-        Value::String("Sosa did fine.\u{263A}".into())
+        Value::Str("Sosa did fine.\u{263A}".into())
     );
 }
 
@@ -260,7 +260,7 @@ fn double_quoted_hex_escape() {
     let map = node.value.as_mapping().unwrap();
     assert_eq!(
         map[&MapKey::String("s".into())].value,
-        Value::String("\r\n".into())
+        Value::Str("\r\n".into())
     );
 }
 
@@ -270,7 +270,7 @@ fn double_quoted_null_escape() {
     let map = node.value.as_mapping().unwrap();
     assert_eq!(
         map[&MapKey::String("s".into())].value,
-        Value::String("\0".into())
+        Value::Str("\0".into())
     );
 }
 
@@ -280,7 +280,7 @@ fn double_quoted_empty() {
     let map = node.value.as_mapping().unwrap();
     assert_eq!(
         map[&MapKey::String("s".into())].value,
-        Value::String("".into())
+        Value::Str("".into())
     );
 }
 
@@ -291,7 +291,7 @@ fn double_quoted_reserved_word() {
     let map = node.value.as_mapping().unwrap();
     assert_eq!(
         map[&MapKey::String("s".into())].value,
-        Value::String("null".into())
+        Value::Str("null".into())
     );
 }
 
@@ -301,7 +301,7 @@ fn double_quoted_true_is_string() {
     let map = node.value.as_mapping().unwrap();
     assert_eq!(
         map[&MapKey::String("s".into())].value,
-        Value::String("true".into())
+        Value::Str("true".into())
     );
 }
 
@@ -314,7 +314,7 @@ fn triple_quoted_simple() {
     let map = node.value.as_mapping().unwrap();
     assert_eq!(
         map[&MapKey::String("s".into())].value,
-        Value::String("This string\nspans many lines.".into())
+        Value::Str("This string\nspans many lines.".into())
     );
 }
 
@@ -325,7 +325,7 @@ fn triple_quoted_with_escape() {
     let map = node.value.as_mapping().unwrap();
     assert_eq!(
         map[&MapKey::String("s".into())].value,
-        Value::String("Line one\nhas an escape.\nLine two is normal.".into())
+        Value::Str("Line one\nhas an escape.\nLine two is normal.".into())
     );
 }
 
@@ -336,7 +336,7 @@ fn triple_quoted_line_continuation() {
     let map = node.value.as_mapping().unwrap();
     assert_eq!(
         map[&MapKey::String("s".into())].value,
-        Value::String("This is all on one line.".into())
+        Value::Str("This is all on one line.".into())
     );
 }
 
@@ -348,7 +348,7 @@ fn triple_quoted_with_hash() {
     let map = node.value.as_mapping().unwrap();
     assert_eq!(
         map[&MapKey::String("s".into())].value,
-        Value::String("x = foo(bar) # this is not a comment".into())
+        Value::Str("x = foo(bar) # this is not a comment".into())
     );
 }
 
@@ -359,7 +359,7 @@ fn triple_quoted_with_quotes() {
     let map = node.value.as_mapping().unwrap();
     assert_eq!(
         map[&MapKey::String("s".into())].value,
-        Value::String("You can add \"quotes\" and 'quotes' here.".into())
+        Value::Str("You can add \"quotes\" and 'quotes' here.".into())
     );
 }
 
@@ -371,7 +371,7 @@ fn triple_quoted_deeper_indent() {
     let map = node.value.as_mapping().unwrap();
     assert_eq!(
         map[&MapKey::String("s".into())].value,
-        Value::String("line one\nline two".into())
+        Value::Str("line one\nline two".into())
     );
 }
 

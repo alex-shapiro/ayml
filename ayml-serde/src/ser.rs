@@ -89,11 +89,11 @@ impl ser::Serializer for ValueSerializer {
     }
 
     fn serialize_char(self, v: char) -> Result<Value, SerError> {
-        Ok(Value::String(v.to_string()))
+        Ok(Value::Str(v.to_string()))
     }
 
     fn serialize_str(self, v: &str) -> Result<Value, SerError> {
-        Ok(Value::String(v.to_string()))
+        Ok(Value::Str(v.to_string()))
     }
 
     fn serialize_bytes(self, _v: &[u8]) -> Result<Value, SerError> {
@@ -122,7 +122,7 @@ impl ser::Serializer for ValueSerializer {
         _variant_index: u32,
         variant: &'static str,
     ) -> Result<Value, SerError> {
-        Ok(Value::String(variant.to_string()))
+        Ok(Value::Str(variant.to_string()))
     }
 
     fn serialize_newtype_struct<T: ?Sized + Serialize>(
@@ -143,7 +143,7 @@ impl ser::Serializer for ValueSerializer {
         let v = value.serialize(ValueSerializer)?;
         let mut map = std::collections::HashMap::new();
         map.insert(MapKey::String(variant.to_string()), Node::new(v));
-        Ok(Value::Mapping(map))
+        Ok(Value::Map(map))
     }
 
     fn serialize_seq(self, len: Option<usize>) -> Result<SeqSerializer, SerError> {
@@ -217,7 +217,7 @@ impl SerializeSeq for SeqSerializer {
     }
 
     fn end(self) -> Result<Value, SerError> {
-        Ok(Value::Sequence(self.entries))
+        Ok(Value::Seq(self.entries))
     }
 }
 
@@ -274,7 +274,7 @@ impl SerializeMap for MapSerializer {
         let map_key = match k {
             Value::Bool(b) => MapKey::Bool(b),
             Value::Int(i) => MapKey::Int(i),
-            Value::String(s) => MapKey::String(s),
+            Value::Str(s) => MapKey::String(s),
             _ => return Err(SerError("mapping keys must be bool, int, or string".into())),
         };
         self.current_key = Some(map_key);
@@ -292,7 +292,7 @@ impl SerializeMap for MapSerializer {
     }
 
     fn end(self) -> Result<Value, SerError> {
-        Ok(Value::Mapping(self.map))
+        Ok(Value::Map(self.map))
     }
 }
 

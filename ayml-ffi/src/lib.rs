@@ -88,9 +88,9 @@ pub unsafe extern "C" fn ayml_node_type(node: *const AymlNode) -> AymlValueType 
         Value::Bool(_) => AymlValueType::Bool,
         Value::Int(_) => AymlValueType::Int,
         Value::Float(_) => AymlValueType::Float,
-        Value::String(_) => AymlValueType::String,
-        Value::Sequence(_) => AymlValueType::Sequence,
-        Value::Mapping(_) => AymlValueType::Mapping,
+        Value::Str(_) => AymlValueType::String,
+        Value::Seq(_) => AymlValueType::Sequence,
+        Value::Map(_) => AymlValueType::Mapping,
     }
 }
 
@@ -180,7 +180,7 @@ pub unsafe extern "C" fn ayml_node_string(node: *const AymlNode) -> *const c_cha
     }
     let node = unsafe { &*(*node).node };
     match &node.value {
-        Value::String(s) => {
+        Value::Str(s) => {
             // Leak a CString — caller must not free this; it lives as long as the doc.
             // TODO: better lifetime management. For now, this leaks.
             match CString::new(s.as_str()) {
@@ -203,7 +203,7 @@ pub unsafe extern "C" fn ayml_node_seq_len(node: *const AymlNode) -> usize {
     }
     let node = unsafe { &*(*node).node };
     match &node.value {
-        Value::Sequence(seq) => seq.len(),
+        Value::Seq(seq) => seq.len(),
         _ => 0,
     }
 }

@@ -51,12 +51,12 @@ impl<'de, 'a> de::Deserializer<'de> for ValueDeserializer<'a> {
             Value::Bool(b) => visitor.visit_bool(*b),
             Value::Int(i) => visitor.visit_i64(*i),
             Value::Float(f) => visitor.visit_f64(*f),
-            Value::String(s) => visitor.visit_str(s),
-            Value::Sequence(seq) => {
+            Value::Str(s) => visitor.visit_str(s),
+            Value::Seq(seq) => {
                 let access = SeqDeserializer::new(seq);
                 visitor.visit_seq(access)
             }
-            Value::Mapping(map) => {
+            Value::Map(map) => {
                 let access = MapDeserializer::new(map);
                 visitor.visit_map(access)
             }
@@ -123,7 +123,7 @@ impl<'de, 'a> MapAccess<'de> for MapDeserializer<'a> {
                 let key_value = match key {
                     MapKey::Bool(b) => Value::Bool(*b),
                     MapKey::Int(i) => Value::Int(*i),
-                    MapKey::String(s) => Value::String(s.clone()),
+                    MapKey::String(s) => Value::Str(s.clone()),
                 };
                 seed.deserialize(ValueDeserializer::new(&key_value))
                     .map(Some)

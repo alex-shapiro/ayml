@@ -65,9 +65,9 @@ pub enum Value {
     Bool(bool),
     Int(i64),
     Float(f64),
-    String(String),
-    Sequence(Vec<Node>),
-    Mapping(HashMap<MapKey, Node>),
+    Str(String),
+    Seq(Vec<Node>),
+    Map(HashMap<MapKey, Node>),
 }
 
 impl Value {
@@ -76,11 +76,11 @@ impl Value {
     }
 
     pub fn is_scalar(&self) -> bool {
-        !matches!(self, Value::Sequence(_) | Value::Mapping(_))
+        !matches!(self, Value::Seq(_) | Value::Map(_))
     }
 
     pub fn is_collection(&self) -> bool {
-        matches!(self, Value::Sequence(_) | Value::Mapping(_))
+        matches!(self, Value::Seq(_) | Value::Map(_))
     }
 
     pub fn as_bool(&self) -> Option<bool> {
@@ -106,21 +106,21 @@ impl Value {
 
     pub fn as_str(&self) -> Option<&str> {
         match self {
-            Value::String(s) => Some(s),
+            Value::Str(s) => Some(s),
             _ => None,
         }
     }
 
     pub fn as_sequence(&self) -> Option<&[Node]> {
         match self {
-            Value::Sequence(s) => Some(s),
+            Value::Seq(s) => Some(s),
             _ => None,
         }
     }
 
     pub fn as_mapping(&self) -> Option<&HashMap<MapKey, Node>> {
         match self {
-            Value::Mapping(m) => Some(m),
+            Value::Map(m) => Some(m),
             _ => None,
         }
     }

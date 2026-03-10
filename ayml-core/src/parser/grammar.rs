@@ -283,7 +283,7 @@ impl<'a> Parser<'a> {
             match self.scanner.peek() {
                 Some('"') => {
                     self.scanner.advance();
-                    return Ok(Node::new(Value::String(value)));
+                    return Ok(Node::new(Value::Str(value)));
                 }
                 Some('\\') => {
                     self.scanner.advance();
@@ -467,7 +467,7 @@ impl<'a> Parser<'a> {
         // Post-process: replace sentinel `\0` + `\n` pairs for line continuation
         let result = result.replace("\x00\n", "");
 
-        Ok(Node::new(Value::String(result)))
+        Ok(Node::new(Value::Str(result)))
     }
 
     /// Helper: take `n` hex digits from a char iterator and decode.
@@ -515,7 +515,7 @@ impl<'a> Parser<'a> {
         } else if let Some(f) = Self::try_parse_float(&text) {
             Value::Float(f)
         } else {
-            Value::String(text)
+            Value::Str(text)
         };
 
         Ok(Node::new(value))
@@ -736,7 +736,7 @@ impl<'a> Parser<'a> {
 
         // Parse the sequence at the detected indent level
         let entries = self.parse_block_sequence(indent)?;
-        Ok(Some(Node::new(Value::Sequence(entries))))
+        Ok(Some(Node::new(Value::Seq(entries))))
     }
 
     /// l-block-sequence(n)
@@ -902,7 +902,7 @@ impl<'a> Parser<'a> {
             map.insert(next_key, value_node);
         }
 
-        Ok(Some(Node::new(Value::Mapping(map))))
+        Ok(Some(Node::new(Value::Map(map))))
     }
 
     // ── Block Mapping ────────────────────────────────────────────────
@@ -931,7 +931,7 @@ impl<'a> Parser<'a> {
 
         // Try to parse a full mapping
         match self.parse_block_mapping(indent) {
-            Ok(map) => Ok(Some(Node::new(Value::Mapping(map)))),
+            Ok(map) => Ok(Some(Node::new(Value::Map(map)))),
             Err(e) if is_hard_error(&e) => Err(e),
             Err(_) => {
                 self.scanner.offset = saved;
@@ -1114,13 +1114,13 @@ impl<'a> Parser<'a> {
                 if self.scanner.input[self.scanner.offset..].starts_with("\"\"\"") {
                     let node = self.parse_triple_quoted()?;
                     match node.value {
-                        Value::String(s) => Ok(Some(RawMapKey::Valid(MapKey::String(s)))),
+                        Value::Str(s) => Ok(Some(RawMapKey::Valid(MapKey::String(s)))),
                         _ => unreachable!(),
                     }
                 } else {
                     let node = self.parse_double_quoted()?;
                     match node.value {
-                        Value::String(s) => Ok(Some(RawMapKey::Valid(MapKey::String(s)))),
+                        Value::Str(s) => Ok(Some(RawMapKey::Valid(MapKey::String(s)))),
                         _ => unreachable!(),
                     }
                 }
@@ -1249,7 +1249,7 @@ impl<'a> Parser<'a> {
                 .error(ErrorKind::Expected("`]` to close flow sequence".into())));
         }
 
-        Ok(Node::new(Value::Sequence(entries)))
+        Ok(Node::new(Value::Seq(entries)))
     }
 
     /// c-flow-mapping
@@ -1293,7 +1293,7 @@ impl<'a> Parser<'a> {
                 .error(ErrorKind::Expected("`}` to close flow mapping".into())));
         }
 
-        Ok(Node::new(Value::Mapping(map)))
+        Ok(Node::new(Value::Map(map)))
     }
 
     /// ns-flow-mapping-entry

@@ -89,16 +89,16 @@ fn assert_values_eq(a: &Value, b: &Value, context: &str) {
                 assert_eq!(a, b, "float mismatch in {context}");
             }
         }
-        (Value::String(a), Value::String(b)) => {
+        (Value::Str(a), Value::Str(b)) => {
             assert_eq!(a, b, "string mismatch in {context}");
         }
-        (Value::Sequence(a), Value::Sequence(b)) => {
+        (Value::Seq(a), Value::Seq(b)) => {
             assert_eq!(a.len(), b.len(), "sequence length mismatch in {context}");
             for (i, (na, nb)) in a.iter().zip(b.iter()).enumerate() {
                 assert_values_eq(&na.value, &nb.value, &format!("{context}[{i}]"));
             }
         }
-        (Value::Mapping(a), Value::Mapping(b)) => {
+        (Value::Map(a), Value::Map(b)) => {
             assert_eq!(
                 a.len(),
                 b.len(),

@@ -8,9 +8,9 @@ fn sequence_of_scalars() {
     let node = parse(input).unwrap();
     let seq = node.value.as_sequence().unwrap();
     assert_eq!(seq.len(), 3);
-    assert_eq!(seq[0].value, Value::String("Mark McGwire".into()));
-    assert_eq!(seq[1].value, Value::String("Sammy Sosa".into()));
-    assert_eq!(seq[2].value, Value::String("Ken Griffey".into()));
+    assert_eq!(seq[0].value, Value::Str("Mark McGwire".into()));
+    assert_eq!(seq[1].value, Value::Str("Sammy Sosa".into()));
+    assert_eq!(seq[2].value, Value::Str("Ken Griffey".into()));
 }
 
 #[test]
@@ -30,7 +30,7 @@ fn sequence_of_mixed() {
     let node = parse(input).unwrap();
     let seq = node.value.as_sequence().unwrap();
     assert_eq!(seq.len(), 5);
-    assert_eq!(seq[0].value, Value::String("hello".into()));
+    assert_eq!(seq[0].value, Value::Str("hello".into()));
     assert_eq!(seq[1].value, Value::Int(42));
     assert_eq!(seq[2].value, Value::Bool(true));
     assert!(seq[3].value.is_null());
@@ -71,14 +71,14 @@ national:
         .as_sequence()
         .unwrap();
     assert_eq!(american.len(), 3);
-    assert_eq!(american[0].value, Value::String("Boston Red Sox".into()));
+    assert_eq!(american[0].value, Value::Str("Boston Red Sox".into()));
 
     let national = map[&MapKey::String("national".into())]
         .value
         .as_sequence()
         .unwrap();
     assert_eq!(national.len(), 3);
-    assert_eq!(national[0].value, Value::String("New York Mets".into()));
+    assert_eq!(national[0].value, Value::Str("New York Mets".into()));
 }
 
 #[test]
@@ -97,7 +97,7 @@ fn sequence_of_mappings() {
     let m0 = seq[0].value.as_mapping().unwrap();
     assert_eq!(
         m0[&MapKey::String("name".into())].value,
-        Value::String("Mark McGwire".into())
+        Value::Str("Mark McGwire".into())
     );
     assert_eq!(m0[&MapKey::String("hr".into())].value, Value::Int(65));
     assert_eq!(m0[&MapKey::String("avg".into())].value, Value::Float(0.278));
@@ -105,7 +105,7 @@ fn sequence_of_mappings() {
     let m1 = seq[1].value.as_mapping().unwrap();
     assert_eq!(
         m1[&MapKey::String("name".into())].value,
-        Value::String("Sammy Sosa".into())
+        Value::Str("Sammy Sosa".into())
     );
     assert_eq!(m1[&MapKey::String("hr".into())].value, Value::Int(63));
 }
@@ -127,7 +127,7 @@ bill-to:
         .unwrap();
     assert_eq!(
         bill_to[&MapKey::String("given".into())].value,
-        Value::String("Chris".into())
+        Value::Str("Chris".into())
     );
 
     let address = bill_to[&MapKey::String("address".into())]
@@ -136,7 +136,7 @@ bill-to:
         .unwrap();
     assert_eq!(
         address[&MapKey::String("city".into())].value,
-        Value::String("Royal Oak".into())
+        Value::Str("Royal Oak".into())
     );
 }
 
@@ -156,7 +156,7 @@ fn compact_nested_mapping() {
     let m0 = seq[0].value.as_mapping().unwrap();
     assert_eq!(
         m0[&MapKey::String("item".into())].value,
-        Value::String("Super Hoop".into())
+        Value::Str("Super Hoop".into())
     );
     assert_eq!(m0[&MapKey::String("quantity".into())].value, Value::Int(1));
 }
@@ -173,9 +173,9 @@ fn flow_sequence_simple() {
         .as_sequence()
         .unwrap();
     assert_eq!(seq.len(), 3);
-    assert_eq!(seq[0].value, Value::String("name".into()));
-    assert_eq!(seq[1].value, Value::String("hr".into()));
-    assert_eq!(seq[2].value, Value::String("avg".into()));
+    assert_eq!(seq[0].value, Value::Str("name".into()));
+    assert_eq!(seq[1].value, Value::Str("hr".into()));
+    assert_eq!(seq[2].value, Value::Str("avg".into()));
 }
 
 #[test]
@@ -187,7 +187,7 @@ fn flow_sequence_with_types() {
         .value
         .as_sequence()
         .unwrap();
-    assert_eq!(seq[0].value, Value::String("Mark McGwire".into()));
+    assert_eq!(seq[0].value, Value::Str("Mark McGwire".into()));
     assert_eq!(seq[1].value, Value::Int(65));
     assert_eq!(seq[2].value, Value::Float(0.278));
 }
@@ -228,7 +228,7 @@ fn flow_sequence_nested() {
 
     let row0 = seq[0].value.as_sequence().unwrap();
     assert_eq!(row0.len(), 3);
-    assert_eq!(row0[0].value, Value::String("name".into()));
+    assert_eq!(row0[0].value, Value::Str("name".into()));
 }
 
 // ── Flow Mappings ────────────────────────────────────────────────
@@ -292,8 +292,8 @@ fn bool_mapping_key() {
     let input = "true: yes\nfalse: no";
     let node = parse(input).unwrap();
     let map = node.value.as_mapping().unwrap();
-    assert_eq!(map[&MapKey::Bool(true)].value, Value::String("yes".into()));
-    assert_eq!(map[&MapKey::Bool(false)].value, Value::String("no".into()));
+    assert_eq!(map[&MapKey::Bool(true)].value, Value::Str("yes".into()));
+    assert_eq!(map[&MapKey::Bool(false)].value, Value::Str("no".into()));
 }
 
 #[test]
@@ -301,8 +301,8 @@ fn int_mapping_key() {
     let input = "1: first\n2: second";
     let node = parse(input).unwrap();
     let map = node.value.as_mapping().unwrap();
-    assert_eq!(map[&MapKey::Int(1)].value, Value::String("first".into()));
-    assert_eq!(map[&MapKey::Int(2)].value, Value::String("second".into()));
+    assert_eq!(map[&MapKey::Int(1)].value, Value::Str("first".into()));
+    assert_eq!(map[&MapKey::Int(2)].value, Value::Str("second".into()));
 }
 
 #[test]
@@ -312,6 +312,6 @@ fn quoted_null_key() {
     let map = node.value.as_mapping().unwrap();
     assert_eq!(
         map[&MapKey::String("null".into())].value,
-        Value::String("a value".into())
+        Value::Str("a value".into())
     );
 }

@@ -55,6 +55,6 @@ fn hash_preceded_by_nonspace_not_comment() {
     let map = node.value.as_mapping().unwrap();
     assert_eq!(
         map[&MapKey::String("tag".into())].value,
-        Value::String("foo#bar".into())
+        Value::Str("foo#bar".into())
     );
 }
