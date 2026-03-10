@@ -1,4 +1,4 @@
-use ayml_core::{parse, Value, MapKey};
+use ayml_core::{MapKey, Value, parse};
 
 // ── Block Sequences ──────────────────────────────────────────────
 
@@ -45,7 +45,10 @@ fn mapping_scalars_to_scalars() {
     let node = parse(input).unwrap();
     let map = node.value.as_mapping().unwrap();
     assert_eq!(map[&MapKey::String("hr".into())].value, Value::Int(65));
-    assert_eq!(map[&MapKey::String("avg".into())].value, Value::Float(0.278));
+    assert_eq!(
+        map[&MapKey::String("avg".into())].value,
+        Value::Float(0.278)
+    );
     assert_eq!(map[&MapKey::String("rbi".into())].value, Value::Int(147));
 }
 
@@ -63,11 +66,17 @@ national:
     let node = parse(input).unwrap();
     let map = node.value.as_mapping().unwrap();
 
-    let american = map[&MapKey::String("american".into())].value.as_sequence().unwrap();
+    let american = map[&MapKey::String("american".into())]
+        .value
+        .as_sequence()
+        .unwrap();
     assert_eq!(american.len(), 3);
     assert_eq!(american[0].value, Value::String("Boston Red Sox".into()));
 
-    let national = map[&MapKey::String("national".into())].value.as_sequence().unwrap();
+    let national = map[&MapKey::String("national".into())]
+        .value
+        .as_sequence()
+        .unwrap();
     assert_eq!(national.len(), 3);
     assert_eq!(national[0].value, Value::String("New York Mets".into()));
 }
@@ -86,12 +95,18 @@ fn sequence_of_mappings() {
     assert_eq!(seq.len(), 2);
 
     let m0 = seq[0].value.as_mapping().unwrap();
-    assert_eq!(m0[&MapKey::String("name".into())].value, Value::String("Mark McGwire".into()));
+    assert_eq!(
+        m0[&MapKey::String("name".into())].value,
+        Value::String("Mark McGwire".into())
+    );
     assert_eq!(m0[&MapKey::String("hr".into())].value, Value::Int(65));
     assert_eq!(m0[&MapKey::String("avg".into())].value, Value::Float(0.278));
 
     let m1 = seq[1].value.as_mapping().unwrap();
-    assert_eq!(m1[&MapKey::String("name".into())].value, Value::String("Sammy Sosa".into()));
+    assert_eq!(
+        m1[&MapKey::String("name".into())].value,
+        Value::String("Sammy Sosa".into())
+    );
     assert_eq!(m1[&MapKey::String("hr".into())].value, Value::Int(63));
 }
 
@@ -106,11 +121,23 @@ bill-to:
     state: MI";
     let node = parse(input).unwrap();
     let map = node.value.as_mapping().unwrap();
-    let bill_to = map[&MapKey::String("bill-to".into())].value.as_mapping().unwrap();
-    assert_eq!(bill_to[&MapKey::String("given".into())].value, Value::String("Chris".into()));
+    let bill_to = map[&MapKey::String("bill-to".into())]
+        .value
+        .as_mapping()
+        .unwrap();
+    assert_eq!(
+        bill_to[&MapKey::String("given".into())].value,
+        Value::String("Chris".into())
+    );
 
-    let address = bill_to[&MapKey::String("address".into())].value.as_mapping().unwrap();
-    assert_eq!(address[&MapKey::String("city".into())].value, Value::String("Royal Oak".into()));
+    let address = bill_to[&MapKey::String("address".into())]
+        .value
+        .as_mapping()
+        .unwrap();
+    assert_eq!(
+        address[&MapKey::String("city".into())].value,
+        Value::String("Royal Oak".into())
+    );
 }
 
 #[test]
@@ -127,7 +154,10 @@ fn compact_nested_mapping() {
     assert_eq!(seq.len(), 3);
 
     let m0 = seq[0].value.as_mapping().unwrap();
-    assert_eq!(m0[&MapKey::String("item".into())].value, Value::String("Super Hoop".into()));
+    assert_eq!(
+        m0[&MapKey::String("item".into())].value,
+        Value::String("Super Hoop".into())
+    );
     assert_eq!(m0[&MapKey::String("quantity".into())].value, Value::Int(1));
 }
 
@@ -138,7 +168,10 @@ fn flow_sequence_simple() {
     let input = "items: [name, hr, avg]";
     let node = parse(input).unwrap();
     let map = node.value.as_mapping().unwrap();
-    let seq = map[&MapKey::String("items".into())].value.as_sequence().unwrap();
+    let seq = map[&MapKey::String("items".into())]
+        .value
+        .as_sequence()
+        .unwrap();
     assert_eq!(seq.len(), 3);
     assert_eq!(seq[0].value, Value::String("name".into()));
     assert_eq!(seq[1].value, Value::String("hr".into()));
@@ -150,7 +183,10 @@ fn flow_sequence_with_types() {
     let input = "items: [Mark McGwire, 65, 0.278]";
     let node = parse(input).unwrap();
     let map = node.value.as_mapping().unwrap();
-    let seq = map[&MapKey::String("items".into())].value.as_sequence().unwrap();
+    let seq = map[&MapKey::String("items".into())]
+        .value
+        .as_sequence()
+        .unwrap();
     assert_eq!(seq[0].value, Value::String("Mark McGwire".into()));
     assert_eq!(seq[1].value, Value::Int(65));
     assert_eq!(seq[2].value, Value::Float(0.278));
@@ -161,7 +197,10 @@ fn flow_sequence_trailing_comma() {
     let input = "items: [a, b, c,]";
     let node = parse(input).unwrap();
     let map = node.value.as_mapping().unwrap();
-    let seq = map[&MapKey::String("items".into())].value.as_sequence().unwrap();
+    let seq = map[&MapKey::String("items".into())]
+        .value
+        .as_sequence()
+        .unwrap();
     assert_eq!(seq.len(), 3);
 }
 
@@ -170,7 +209,10 @@ fn flow_sequence_empty() {
     let input = "items: []";
     let node = parse(input).unwrap();
     let map = node.value.as_mapping().unwrap();
-    let seq = map[&MapKey::String("items".into())].value.as_sequence().unwrap();
+    let seq = map[&MapKey::String("items".into())]
+        .value
+        .as_sequence()
+        .unwrap();
     assert_eq!(seq.len(), 0);
 }
 
@@ -196,9 +238,15 @@ fn flow_mapping_simple() {
     let input = "player: {hr: 65, avg: 0.278}";
     let node = parse(input).unwrap();
     let map = node.value.as_mapping().unwrap();
-    let inner = map[&MapKey::String("player".into())].value.as_mapping().unwrap();
+    let inner = map[&MapKey::String("player".into())]
+        .value
+        .as_mapping()
+        .unwrap();
     assert_eq!(inner[&MapKey::String("hr".into())].value, Value::Int(65));
-    assert_eq!(inner[&MapKey::String("avg".into())].value, Value::Float(0.278));
+    assert_eq!(
+        inner[&MapKey::String("avg".into())].value,
+        Value::Float(0.278)
+    );
 }
 
 #[test]
@@ -206,7 +254,10 @@ fn flow_mapping_trailing_comma() {
     let input = "player: {hr: 65, avg: 0.278,}";
     let node = parse(input).unwrap();
     let map = node.value.as_mapping().unwrap();
-    let inner = map[&MapKey::String("player".into())].value.as_mapping().unwrap();
+    let inner = map[&MapKey::String("player".into())]
+        .value
+        .as_mapping()
+        .unwrap();
     assert_eq!(inner.len(), 2);
 }
 
@@ -215,7 +266,10 @@ fn flow_mapping_multiline() {
     let input = "player: {\n  hr: 63,\n  avg: 0.288,\n}";
     let node = parse(input).unwrap();
     let map = node.value.as_mapping().unwrap();
-    let inner = map[&MapKey::String("player".into())].value.as_mapping().unwrap();
+    let inner = map[&MapKey::String("player".into())]
+        .value
+        .as_mapping()
+        .unwrap();
     assert_eq!(inner[&MapKey::String("hr".into())].value, Value::Int(63));
 }
 
@@ -224,7 +278,10 @@ fn flow_mapping_empty() {
     let input = "player: {}";
     let node = parse(input).unwrap();
     let map = node.value.as_mapping().unwrap();
-    let inner = map[&MapKey::String("player".into())].value.as_mapping().unwrap();
+    let inner = map[&MapKey::String("player".into())]
+        .value
+        .as_mapping()
+        .unwrap();
     assert_eq!(inner.len(), 0);
 }
 

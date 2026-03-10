@@ -181,11 +181,7 @@ impl ser::Serializer for ValueSerializer {
         })
     }
 
-    fn serialize_struct(
-        self,
-        _name: &'static str,
-        _len: usize,
-    ) -> Result<MapSerializer, SerError> {
+    fn serialize_struct(self, _name: &'static str, _len: usize) -> Result<MapSerializer, SerError> {
         Ok(MapSerializer {
             map: std::collections::HashMap::new(),
             current_key: None,

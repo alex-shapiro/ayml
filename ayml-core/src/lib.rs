@@ -1,8 +1,8 @@
 mod error;
 mod value;
 
-pub mod parser;
 pub mod emitter;
+pub mod parser;
 
 pub use error::{Error, ErrorKind, Span};
 pub use value::{MapKey, Node, Value};

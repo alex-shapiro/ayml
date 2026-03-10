@@ -1,4 +1,4 @@
-use ayml_core::{parse, Value, MapKey};
+use ayml_core::{MapKey, Value, parse};
 
 // ── Null ─────────────────────────────────────────────────────────
 
@@ -23,7 +23,10 @@ fn bool_true() {
 fn bool_false() {
     let node = parse("flag: false").unwrap();
     let map = node.value.as_mapping().unwrap();
-    assert_eq!(map[&MapKey::String("flag".into())].value, Value::Bool(false));
+    assert_eq!(
+        map[&MapKey::String("flag".into())].value,
+        Value::Bool(false)
+    );
 }
 
 // ── Integers ─────────────────────────────────────────────────────
@@ -53,7 +56,10 @@ fn integer_positive_sign() {
 fn integer_binary() {
     let node = parse("n: 0b10101010").unwrap();
     let map = node.value.as_mapping().unwrap();
-    assert_eq!(map[&MapKey::String("n".into())].value, Value::Int(0b10101010));
+    assert_eq!(
+        map[&MapKey::String("n".into())].value,
+        Value::Int(0b10101010)
+    );
 }
 
 #[test]
@@ -83,7 +89,10 @@ fn integer_zero() {
 fn float_fixed() {
     let node = parse("n: 1230.15").unwrap();
     let map = node.value.as_mapping().unwrap();
-    assert_eq!(map[&MapKey::String("n".into())].value, Value::Float(1230.15));
+    assert_eq!(
+        map[&MapKey::String("n".into())].value,
+        Value::Float(1230.15)
+    );
 }
 
 #[test]
@@ -123,21 +132,30 @@ fn float_pure_exponential() {
 fn float_inf() {
     let node = parse("n: inf").unwrap();
     let map = node.value.as_mapping().unwrap();
-    assert_eq!(map[&MapKey::String("n".into())].value, Value::Float(f64::INFINITY));
+    assert_eq!(
+        map[&MapKey::String("n".into())].value,
+        Value::Float(f64::INFINITY)
+    );
 }
 
 #[test]
 fn float_neg_inf() {
     let node = parse("n: -inf").unwrap();
     let map = node.value.as_mapping().unwrap();
-    assert_eq!(map[&MapKey::String("n".into())].value, Value::Float(f64::NEG_INFINITY));
+    assert_eq!(
+        map[&MapKey::String("n".into())].value,
+        Value::Float(f64::NEG_INFINITY)
+    );
 }
 
 #[test]
 fn float_pos_inf() {
     let node = parse("n: +inf").unwrap();
     let map = node.value.as_mapping().unwrap();
-    assert_eq!(map[&MapKey::String("n".into())].value, Value::Float(f64::INFINITY));
+    assert_eq!(
+        map[&MapKey::String("n".into())].value,
+        Value::Float(f64::INFINITY)
+    );
 }
 
 #[test]

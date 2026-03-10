@@ -111,8 +111,8 @@ impl<'a> Scanner<'a> {
         if slice.len() < n {
             return false;
         }
-        for i in 0..n {
-            if slice[i] != b' ' {
+        for &b in &slice[..n] {
+            if b != b' ' {
                 return false;
             }
         }
@@ -205,10 +205,7 @@ impl<'a> Scanner<'a> {
                 }
                 _ => {
                     return Err(Error::new(
-                        ErrorKind::InvalidEscape(format!(
-                            "expected {} hex digits",
-                            digits
-                        )),
+                        ErrorKind::InvalidEscape(format!("expected {} hex digits", digits)),
                         Span::new(start, self.offset),
                         self.input,
                     ));

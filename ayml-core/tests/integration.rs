@@ -4,7 +4,7 @@
 use std::fs;
 use std::path::Path;
 
-use ayml_core::{emit, parse, Value};
+use ayml_core::{Value, emit, parse};
 
 fn fixture_dir() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -93,17 +93,9 @@ fn assert_values_eq(a: &Value, b: &Value, context: &str) {
             assert_eq!(a, b, "string mismatch in {context}");
         }
         (Value::Sequence(a), Value::Sequence(b)) => {
-            assert_eq!(
-                a.len(),
-                b.len(),
-                "sequence length mismatch in {context}"
-            );
+            assert_eq!(a.len(), b.len(), "sequence length mismatch in {context}");
             for (i, (na, nb)) in a.iter().zip(b.iter()).enumerate() {
-                assert_values_eq(
-                    &na.value,
-                    &nb.value,
-                    &format!("{context}[{i}]"),
-                );
+                assert_values_eq(&na.value, &nb.value, &format!("{context}[{i}]"));
             }
         }
         (Value::Mapping(a), Value::Mapping(b)) => {
@@ -118,11 +110,7 @@ fn assert_values_eq(a: &Value, b: &Value, context: &str) {
                 let node_b = b.get(key).unwrap_or_else(|| {
                     panic!("key {key} missing after round-trip in {context}");
                 });
-                assert_values_eq(
-                    &node_a.value,
-                    &node_b.value,
-                    &format!("{context}.{key}"),
-                );
+                assert_values_eq(&node_a.value, &node_b.value, &format!("{context}.{key}"));
             }
         }
         _ => {

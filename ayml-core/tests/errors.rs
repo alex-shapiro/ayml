@@ -1,4 +1,4 @@
-use ayml_core::{parse, ErrorKind};
+use ayml_core::{ErrorKind, parse};
 
 #[test]
 fn duplicate_key() {

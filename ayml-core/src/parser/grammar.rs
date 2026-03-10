@@ -99,7 +99,7 @@ impl<'a> Parser<'a> {
 
     /// Parse a block of consecutive comment lines at indentation <= n.
     /// Returns the joined comment text (without `#` prefixes), or None.
-    fn parse_comment_block(&mut self, n: usize) -> Option<String> {
+    fn parse_comment_block(&mut self, _n: usize) -> Option<String> {
         let mut lines: Vec<String> = Vec::new();
 
         loop {
@@ -203,7 +203,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Skip trailing blank lines and comments after the root node.
-    fn skip_trailing(&mut self, n: usize) {
+    fn skip_trailing(&mut self, _n: usize) {
         loop {
             let saved = self.scanner.offset;
             self.scanner.skip_inline_whitespace();
@@ -344,14 +344,12 @@ impl<'a> Parser<'a> {
             }
 
             // Check if this line is the closing `"""`
-            let line_start = self.scanner.offset;
             let spaces = self.scanner.count_spaces();
 
             // Peek ahead: is this `<indent>"""`?
             let after_spaces = &self.scanner.input[self.scanner.offset + spaces..];
-            if after_spaces.starts_with("\"\"\"") {
+            if let Some(after_close) = after_spaces.strip_prefix("\"\"\"") {
                 // Check it's followed by end-of-line or EOF
-                let after_close = &after_spaces[3..];
                 if after_close.is_empty()
                     || after_close.starts_with('\n')
                     || after_close.starts_with('\r')
@@ -503,7 +501,6 @@ impl<'a> Parser<'a> {
 
     /// Parse a bare (unquoted) scalar with type resolution.
     fn parse_bare_scalar(&mut self, ctx: Context) -> Result<Node, Error> {
-        let start = self.scanner.offset;
         let text = self.scan_bare_string(ctx)?;
 
         // Scalar resolution: null → bool → int → float → string
@@ -671,9 +668,7 @@ impl<'a> Parser<'a> {
 
         // Validate structure
         if has_dot {
-            let mut parts = s.splitn(2, '.');
-            let int_part = parts.next()?;
-            let frac_and_exp = parts.next()?;
+            let (int_part, frac_and_exp) = s.split_once('.')?;
 
             if int_part.is_empty() || !int_part.chars().all(|c| c.is_ascii_digit()) {
                 return None;
@@ -689,10 +684,8 @@ impl<'a> Parser<'a> {
                 if !Self::valid_exponent(exp) {
                     return None;
                 }
-            } else {
-                if frac_and_exp.is_empty() || !frac_and_exp.chars().all(|c| c.is_ascii_digit()) {
-                    return None;
-                }
+            } else if frac_and_exp.is_empty() || !frac_and_exp.chars().all(|c| c.is_ascii_digit()) {
+                return None;
             }
         } else {
             // Pure exponential: digits e [+-]? digits
@@ -728,8 +721,6 @@ impl<'a> Parser<'a> {
 
     /// Try to parse a block sequence at indentation n.
     fn try_block_sequence(&mut self, n: usize) -> Result<Option<Node>, Error> {
-        let saved = self.scanner.offset;
-
         // Check if the current line starts with `- ` at indent n
         let spaces = self.scanner.count_spaces();
         if spaces < n {
@@ -850,9 +841,7 @@ impl<'a> Parser<'a> {
 
         // Check for `: `
         self.scanner.skip_inline_whitespace();
-        if !self.scanner.eat(':')
-            || (!self.scanner.is_white() && !self.scanner.is_break_or_eof())
-        {
+        if !self.scanner.eat(':') || (!self.scanner.is_white() && !self.scanner.is_break_or_eof()) {
             // Not a mapping — rewind
             self.scanner.offset = saved;
             return Ok(None);
@@ -1087,11 +1076,11 @@ impl<'a> Parser<'a> {
 
         // Try block sequence first — sequences are allowed at m >= n
         // because `- ` provides implicit nesting (+2).
-        if m >= n {
-            if let Some(mut node) = self.try_block_sequence(m)? {
-                node.comment = comment;
-                return Ok(node);
-            }
+        if m >= n
+            && let Some(mut node) = self.try_block_sequence(m)?
+        {
+            node.comment = comment;
+            return Ok(node);
         }
 
         // For mappings and scalars, m must be > n.
@@ -1272,7 +1261,6 @@ impl<'a> Parser<'a> {
 
         if self.scanner.peek() != Some('}') {
             let (key, value) = self.parse_flow_mapping_entry()?;
-            let key_str = format!("{key}");
             map.insert(key, value);
 
             loop {

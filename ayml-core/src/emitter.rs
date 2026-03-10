@@ -300,7 +300,10 @@ fn needs_quoting(s: &str) -> bool {
         return true;
     }
     // Reserved words
-    if matches!(s, "null" | "true" | "false" | "inf" | "+inf" | "-inf" | "nan") {
+    if matches!(
+        s,
+        "null" | "true" | "false" | "inf" | "+inf" | "-inf" | "nan"
+    ) {
         return true;
     }
     // If it looks like a number, quote it

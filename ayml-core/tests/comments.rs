@@ -1,4 +1,4 @@
-use ayml_core::{parse, Value, MapKey};
+use ayml_core::{MapKey, Value, parse};
 
 #[test]
 fn top_level_comment() {

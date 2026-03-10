@@ -1,5 +1,5 @@
-use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use serde::Deserialize;
+use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 
 use ayml_core::{Error as AymlError, MapKey, Node, Value};
 
