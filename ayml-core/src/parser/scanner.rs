@@ -4,7 +4,7 @@ use crate::error::{Error, ErrorKind, Span};
 ///
 /// Tracks byte offset, line, and column. Provides helpers for the character
 /// productions defined in the spec (c-printable, b-break, s-white, etc.).
-pub(crate) struct Scanner<'a> {
+pub struct Scanner<'a> {
     pub input: &'a str,
     bytes: &'a [u8],
     /// Current byte offset into the input.
@@ -12,7 +12,7 @@ pub(crate) struct Scanner<'a> {
 }
 
 impl<'a> Scanner<'a> {
-    pub fn new(input: &'a str) -> Self {
+    pub const fn new(input: &'a str) -> Self {
         Self {
             input,
             bytes: input.as_bytes(),
@@ -21,12 +21,12 @@ impl<'a> Scanner<'a> {
     }
 
     /// The full source input (for error reporting).
-    pub fn source(&self) -> &'a str {
+    pub const fn source(&self) -> &'a str {
         self.input
     }
 
     /// True if the scanner has reached the end of input.
-    pub fn is_eof(&self) -> bool {
+    pub const fn is_eof(&self) -> bool {
         self.offset >= self.input.len()
     }
 
@@ -143,7 +143,7 @@ impl<'a> Scanner<'a> {
     }
 
     /// Check if a character is in the c-printable set per the spec.
-    pub fn is_printable(ch: char) -> bool {
+    pub const fn is_printable(ch: char) -> bool {
         let cp = ch as u32;
         matches!(cp,
             0x09 | 0x0A | 0x0D |
@@ -205,7 +205,7 @@ impl<'a> Scanner<'a> {
                 }
                 _ => {
                     return Err(Error::new(
-                        ErrorKind::InvalidEscape(format!("expected {} hex digits", digits)),
+                        ErrorKind::InvalidEscape(format!("expected {digits} hex digits")),
                         Span::new(start, self.offset),
                         self.input,
                     ));

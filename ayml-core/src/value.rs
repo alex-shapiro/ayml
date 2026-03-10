@@ -19,7 +19,8 @@ pub struct Node {
 
 impl Node {
     /// Create a node with no comments.
-    pub fn new(value: Value) -> Self {
+    #[must_use] 
+    pub const fn new(value: Value) -> Self {
         Self {
             comment: None,
             inline_comment: None,
@@ -51,9 +52,9 @@ pub enum MapKey {
 impl fmt::Display for MapKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            MapKey::Bool(b) => write!(f, "{b}"),
-            MapKey::Int(i) => write!(f, "{i}"),
-            MapKey::String(s) => write!(f, "{s}"),
+            Self::Bool(b) => write!(f, "{b}"),
+            Self::Int(i) => write!(f, "{i}"),
+            Self::String(s) => write!(f, "{s}"),
         }
     }
 }
@@ -71,56 +72,65 @@ pub enum Value {
 }
 
 impl Value {
-    pub fn is_null(&self) -> bool {
-        matches!(self, Value::Null)
+    #[must_use] 
+    pub const fn is_null(&self) -> bool {
+        matches!(self, Self::Null)
     }
 
-    pub fn is_scalar(&self) -> bool {
-        !matches!(self, Value::Seq(_) | Value::Map(_))
+    #[must_use] 
+    pub const fn is_scalar(&self) -> bool {
+        !matches!(self, Self::Seq(_) | Self::Map(_))
     }
 
-    pub fn is_collection(&self) -> bool {
-        matches!(self, Value::Seq(_) | Value::Map(_))
+    #[must_use] 
+    pub const fn is_collection(&self) -> bool {
+        matches!(self, Self::Seq(_) | Self::Map(_))
     }
 
-    pub fn as_bool(&self) -> Option<bool> {
+    #[must_use] 
+    pub const fn as_bool(&self) -> Option<bool> {
         match self {
-            Value::Bool(b) => Some(*b),
+            Self::Bool(b) => Some(*b),
             _ => None,
         }
     }
 
-    pub fn as_i64(&self) -> Option<i64> {
+    #[must_use] 
+    pub const fn as_i64(&self) -> Option<i64> {
         match self {
-            Value::Int(i) => Some(*i),
+            Self::Int(i) => Some(*i),
             _ => None,
         }
     }
 
-    pub fn as_f64(&self) -> Option<f64> {
+    #[must_use] 
+    pub const fn as_f64(&self) -> Option<f64> {
         match self {
-            Value::Float(f) => Some(*f),
+            Self::Float(f) => Some(*f),
             _ => None,
         }
     }
 
+    #[must_use] 
     pub fn as_str(&self) -> Option<&str> {
         match self {
-            Value::Str(s) => Some(s),
+            Self::Str(s) => Some(s),
             _ => None,
         }
     }
 
+    #[must_use] 
     pub fn as_sequence(&self) -> Option<&[Node]> {
         match self {
-            Value::Seq(s) => Some(s),
+            Self::Seq(s) => Some(s),
             _ => None,
         }
     }
 
-    pub fn as_mapping(&self) -> Option<&HashMap<MapKey, Node>> {
+    #[must_use] 
+    pub const fn as_mapping(&self) -> Option<&HashMap<MapKey, Node>> {
         match self {
-            Value::Map(m) => Some(m),
+            Self::Map(m) => Some(m),
             _ => None,
         }
     }

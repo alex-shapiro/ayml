@@ -13,7 +13,7 @@ enum Context {
 
 /// Returns true if the error is a "hard" semantic error that should always
 /// propagate (not be swallowed by backtracking).
-fn is_hard_error(e: &Error) -> bool {
+const fn is_hard_error(e: &Error) -> bool {
     matches!(
         e.kind,
         ErrorKind::DuplicateKey(_)
@@ -38,13 +38,13 @@ enum RawMapKey {
 impl RawMapKey {
     fn validate(self, source: &str, end_offset: usize) -> Result<MapKey, Error> {
         match self {
-            RawMapKey::Valid(k) => Ok(k),
-            RawMapKey::Null(offset) => Err(Error::new(
+            Self::Valid(k) => Ok(k),
+            Self::Null(offset) => Err(Error::new(
                 ErrorKind::NullKey,
                 Span::new(offset, end_offset),
                 source,
             )),
-            RawMapKey::Float(offset) => Err(Error::new(
+            Self::Float(offset) => Err(Error::new(
                 ErrorKind::FloatKey,
                 Span::new(offset, end_offset),
                 source,
@@ -56,7 +56,7 @@ impl RawMapKey {
 /// Recursive descent parser for AYML.
 ///
 /// Method names mirror the BNF production names from the spec where possible.
-pub(crate) struct Parser<'a> {
+pub struct Parser<'a> {
     scanner: Scanner<'a>,
 }
 
@@ -612,7 +612,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Check if a character is a c-indicator.
-    fn is_indicator(ch: char) -> bool {
+    const fn is_indicator(ch: char) -> bool {
         matches!(
             ch,
             '-' | ':' | ',' | '[' | ']' | '{' | '}' | '#' | '"' | '\\'
@@ -868,12 +868,9 @@ impl<'a> Parser<'a> {
             let entry_saved = self.scanner.offset;
             self.scanner.eat_spaces(n);
 
-            let next_raw = match self.try_parse_mapping_key(Context::Block) {
-                Ok(Some(k)) => k,
-                _ => {
-                    self.scanner.offset = entry_saved;
-                    break;
-                }
+            let next_raw = if let Ok(Some(k)) = self.try_parse_mapping_key(Context::Block) { k } else {
+                self.scanner.offset = entry_saved;
+                break;
             };
 
             self.scanner.skip_inline_whitespace();
@@ -951,12 +948,9 @@ impl<'a> Parser<'a> {
             }
 
             let entry_start = self.scanner.offset;
-            let raw_key = match self.try_parse_mapping_key(Context::Block)? {
-                Some(k) => k,
-                None => {
-                    self.scanner.offset -= n;
-                    break;
-                }
+            let raw_key = if let Some(k) = self.try_parse_mapping_key(Context::Block)? { k } else {
+                self.scanner.offset -= n;
+                break;
             };
 
             self.scanner.skip_inline_whitespace();

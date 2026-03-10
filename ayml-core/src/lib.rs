@@ -15,6 +15,7 @@ pub fn parse(input: &str) -> Result<Node, Error> {
 }
 
 /// Emit an AYML document to a string.
+#[must_use] 
 pub fn emit(node: &Node) -> String {
     emitter::emit(node)
 }

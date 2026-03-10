@@ -1,6 +1,7 @@
 use crate::value::{MapKey, Node, Value};
 
 /// Emit an AYML document to a string.
+#[must_use] 
 pub fn emit(node: &Node) -> String {
     let mut out = String::new();
     emit_node(&mut out, node, 0, true);
@@ -24,10 +25,10 @@ fn emit_node(out: &mut String, node: &Node, indent: usize, top_level: bool) {
 
     match &node.value {
         Value::Null => {
-            if !top_level {
+            if top_level {
+                emit_indent(out, indent);
                 out.push_str("null");
             } else {
-                emit_indent(out, indent);
                 out.push_str("null");
             }
         }
