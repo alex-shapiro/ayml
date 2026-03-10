@@ -75,10 +75,7 @@ fn emit_float(out: &mut String, f: f64) {
 }
 
 fn emit_sequence(out: &mut String, entries: &[Node], indent: usize) {
-    for (i, entry) in entries.iter().enumerate() {
-        if i > 0 {
-            out.push('\n');
-        }
+    for entry in entries {
         emit_comment(out, entry.comment.as_deref(), indent);
         emit_indent(out, indent);
         out.push_str("- ");
@@ -89,13 +86,7 @@ fn emit_sequence(out: &mut String, entries: &[Node], indent: usize) {
 }
 
 fn emit_mapping(out: &mut String, map: &std::collections::HashMap<MapKey, Node>, indent: usize) {
-    let mut first = true;
     for (key, value_node) in map {
-        if !first {
-            out.push('\n');
-        }
-        first = false;
-
         emit_comment(out, value_node.comment.as_deref(), indent);
 
         emit_indent(out, indent);
@@ -138,10 +129,26 @@ fn emit_compact_mapping(
     map: &std::collections::HashMap<MapKey, Node>,
     indent: usize,
 ) {
-    let mut first = true;
+    // Emit scalar-valued keys first, then collection-valued keys last,
+    // because a collection value's block content at the same indent makes
+    // subsequent sibling keys unparseable if they follow.
+    let mut scalars: Vec<_> = Vec::new();
+    let mut collections: Vec<_> = Vec::new();
     for (key, value_node) in map {
+        if value_node.value.is_collection() {
+            collections.push((key, value_node));
+        } else {
+            scalars.push((key, value_node));
+        }
+    }
+
+    let mut first = true;
+    for (key, value_node) in scalars.into_iter().chain(collections) {
         if !first {
-            out.push('\n');
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+            emit_comment(out, value_node.comment.as_deref(), indent);
             emit_indent(out, indent);
         }
         first = false;
@@ -150,11 +157,13 @@ fn emit_compact_mapping(
         out.push(':');
 
         if value_node.value.is_collection() {
+            emit_inline_comment(out, value_node.inline_comment.as_deref());
             out.push('\n');
             emit_value(out, &value_node.value, indent, true);
         } else {
             out.push(' ');
             emit_value(out, &value_node.value, indent, false);
+            emit_inline_comment(out, value_node.inline_comment.as_deref());
         }
     }
 }
