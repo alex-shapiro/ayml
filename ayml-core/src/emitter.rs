@@ -1,7 +1,8 @@
 use crate::value::{MapKey, Node, Value};
+use std::fmt::Write as _;
 
 /// Emit an AYML document to a string.
-#[must_use] 
+#[must_use]
 pub fn emit(node: &Node) -> String {
     let mut out = String::new();
     emit_node(&mut out, node, 0, true);
@@ -17,9 +18,7 @@ fn emit_node(out: &mut String, node: &Node, indent: usize, top_level: bool) {
     if let Some(ref comment) = node.comment {
         for line in comment.lines() {
             emit_indent(out, indent);
-            out.push_str("# ");
-            out.push_str(line);
-            out.push('\n');
+            let _ = writeln!(out, "# {line}");
         }
     }
 
@@ -27,22 +26,20 @@ fn emit_node(out: &mut String, node: &Node, indent: usize, top_level: bool) {
         Value::Null => {
             if top_level {
                 emit_indent(out, indent);
-                out.push_str("null");
-            } else {
-                out.push_str("null");
             }
+            out.push_str("null");
         }
         Value::Bool(b) => {
             if top_level {
                 emit_indent(out, indent);
             }
-            out.push_str(if *b { "true" } else { "false" });
+            let _ = write!(out, "{b}");
         }
         Value::Int(i) => {
             if top_level {
                 emit_indent(out, indent);
             }
-            out.push_str(&i.to_string());
+            let _ = write!(out, "{i}");
         }
         Value::Float(f) => {
             if top_level {
@@ -79,10 +76,7 @@ fn emit_node(out: &mut String, node: &Node, indent: usize, top_level: bool) {
                 // Entry comment
                 if let Some(ref comment) = entry.comment {
                     for line in comment.lines() {
-                        emit_indent(out, indent);
-                        out.push_str("# ");
-                        out.push_str(line);
-                        out.push('\n');
+                        let _ = writeln!(out, "# {line}");
                     }
                 }
                 emit_indent(out, indent);
@@ -183,15 +177,19 @@ fn emit_compact_mapping(out: &mut String, node: &Node, indent: usize) {
 fn emit_flow_value(out: &mut String, value: &Value) {
     match value {
         Value::Null => out.push_str("null"),
-        Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
-        Value::Int(i) => out.push_str(&i.to_string()),
+        Value::Bool(b) => {
+            let _ = write!(out, "{b}");
+        }
+        Value::Int(i) => {
+            let _ = write!(out, "{i}");
+        }
         Value::Float(f) => {
             if f.is_nan() {
                 out.push_str("nan");
             } else if f.is_infinite() {
                 out.push_str(if f.is_sign_negative() { "-inf" } else { "inf" });
             } else {
-                out.push_str(&format!("{f}"));
+                let _ = write!(out, "{f}");
             }
         }
         Value::Str(s) => {
@@ -204,7 +202,7 @@ fn emit_flow_value(out: &mut String, value: &Value) {
                     '\r' => out.push_str("\\r"),
                     '\t' => out.push_str("\\t"),
                     ch if ch.is_control() => {
-                        out.push_str(&format!("\\u{:04X}", ch as u32));
+                        let _ = write!(out, "\\u{:04X}", ch as u32);
                     }
                     _ => out.push(ch),
                 }
@@ -240,8 +238,12 @@ fn emit_flow_value(out: &mut String, value: &Value) {
 
 fn emit_map_key(out: &mut String, key: &MapKey) {
     match key {
-        MapKey::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
-        MapKey::Int(i) => out.push_str(&i.to_string()),
+        MapKey::Bool(b) => {
+            let _ = write!(out, "{b}");
+        }
+        MapKey::Int(i) => {
+            let _ = write!(out, "{i}");
+        }
         MapKey::String(s) => {
             if needs_quoting(s) {
                 out.push('"');
@@ -285,7 +287,7 @@ fn emit_string(out: &mut String, s: &str, indent: usize) {
                 '\t' => out.push_str("\\t"),
                 '\r' => out.push_str("\\r"),
                 ch if ch.is_control() => {
-                    out.push_str(&format!("\\u{:04X}", ch as u32));
+                    let _ = write!(out, "\\u{:04X}", ch as u32);
                 }
                 _ => out.push(ch),
             }

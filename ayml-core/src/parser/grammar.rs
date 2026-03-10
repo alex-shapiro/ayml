@@ -61,7 +61,7 @@ pub struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(input: &'a str) -> Self {
+    pub const fn new(input: &'a str) -> Self {
         Self {
             scanner: Scanner::new(input),
         }
@@ -601,7 +601,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Check if a character can start a bare string (ns-plain-first-char).
-    fn is_plain_first(ch: char) -> bool {
+    const fn is_plain_first(ch: char) -> bool {
         if Self::is_indicator(ch) {
             // `-` and `:` are allowed if followed by ns-char (checked by caller context)
             // For simplicity, we allow `-` and `:` here and validate context later
@@ -868,7 +868,9 @@ impl<'a> Parser<'a> {
             let entry_saved = self.scanner.offset;
             self.scanner.eat_spaces(n);
 
-            let next_raw = if let Ok(Some(k)) = self.try_parse_mapping_key(Context::Block) { k } else {
+            let next_raw = if let Ok(Some(k)) = self.try_parse_mapping_key(Context::Block) {
+                k
+            } else {
                 self.scanner.offset = entry_saved;
                 break;
             };
@@ -948,7 +950,7 @@ impl<'a> Parser<'a> {
             }
 
             let entry_start = self.scanner.offset;
-            let raw_key = if let Some(k) = self.try_parse_mapping_key(Context::Block)? { k } else {
+            let Some(raw_key) = self.try_parse_mapping_key(Context::Block)? else {
                 self.scanner.offset -= n;
                 break;
             };

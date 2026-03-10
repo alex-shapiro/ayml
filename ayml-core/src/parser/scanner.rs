@@ -151,7 +151,7 @@ impl<'a> Scanner<'a> {
             0x85 |
             0xA0..=0xD7FF |
             0xE000..=0xFFFD |
-            0x10000..=0x10FFFF
+            0x10000..=0x10_FFFF
         )
     }
 
