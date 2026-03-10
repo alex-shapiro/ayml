@@ -10,6 +10,43 @@ dependencies:
 files:
   rules:
   - path: ./**
+  - path: /Applications/Visual Studio Code.app/Contents/Resources/app/bin/code
+    operations:
+    - read
+  - path: /Users
+    operations:
+    - read
+  - path: ~/Library/Application Support/Arc/User Data
+    action: deny
+    operations:
+    - read
+  - path: ~/Library/Application Support/BraveSoftware/Brave-Browser
+    action: deny
+    operations:
+    - read
+  - path: ~/Library/Application Support/Chromium
+    action: deny
+    operations:
+    - read
+  - path: ~/Library/Application Support/Google/Chrome
+    action: deny
+    operations:
+    - read
+  - path: ~/Library/Application Support/Microsoft Edge
+    action: deny
+    operations:
+    - read
+  - path: ~/Library/Application Support/Vivaldi
+    action: deny
+    operations:
+    - read
+  - path: ~/Library/Application Support/com.operasoftware.Opera
+    action: deny
+    operations:
+    - read
+  - path: ~/Projects
+    operations:
+    - read
 network:
   rules:
   - host: yaml.org
