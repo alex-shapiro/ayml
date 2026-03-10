@@ -97,7 +97,7 @@ fn values_equal(a: &Value, b: &Value) -> bool {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(1000))]
+    #![proptest_config(ProptestConfig::with_cases(10_000))]
 
     /// Emit a random Value tree, parse it back, and verify semantic equality.
     #[test]
