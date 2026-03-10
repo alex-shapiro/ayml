@@ -14,6 +14,16 @@ pub fn emit(node: &Node) -> String {
     out
 }
 
+/// Whether a value needs block-style emission (multiple lines).
+/// Empty collections use flow style (`[]`, `{}`), so they don't.
+fn needs_block(value: &Value) -> bool {
+    match value {
+        Value::Seq(entries) => !entries.is_empty(),
+        Value::Map(map) => !map.is_empty(),
+        _ => false,
+    }
+}
+
 fn emit_comment(out: &mut String, comment: Option<&str>, indent: usize) {
     if let Some(comment) = comment {
         for line in comment.lines() {
@@ -55,6 +65,18 @@ fn emit_value(out: &mut String, value: &Value, indent: usize, top_level: bool) {
             }
             emit_string(out, s, indent);
         }
+        Value::Seq(entries) if entries.is_empty() => {
+            if top_level {
+                emit_indent(out, indent);
+            }
+            out.push_str("[]");
+        }
+        Value::Map(map) if map.is_empty() => {
+            if top_level {
+                emit_indent(out, indent);
+            }
+            out.push_str("{}");
+        }
         Value::Seq(entries) => emit_sequence(out, entries, indent),
         Value::Map(map) => emit_mapping(out, map, indent),
     }
@@ -93,9 +115,9 @@ fn emit_mapping(out: &mut String, map: &std::collections::HashMap<MapKey, Node>,
         emit_map_key(out, key);
         out.push(':');
 
-        if value_node.value.is_collection() {
+        if needs_block(&value_node.value) {
             out.push('\n');
-            emit_value(out, &value_node.value, indent, true);
+            emit_value(out, &value_node.value, indent + 2, true);
         } else {
             out.push(' ');
             emit_value(out, &value_node.value, indent, false);
@@ -103,7 +125,7 @@ fn emit_mapping(out: &mut String, map: &std::collections::HashMap<MapKey, Node>,
 
         emit_inline_comment(out, value_node.inline_comment.as_deref());
 
-        if !value_node.value.is_collection() {
+        if !needs_block(&value_node.value) {
             out.push('\n');
         }
     }
@@ -118,8 +140,8 @@ fn emit_inline_comment(out: &mut String, comment: Option<&str>) {
 
 fn emit_seq_entry_value(out: &mut String, node: &Node, indent: usize) {
     match &node.value {
-        Value::Map(map) => emit_compact_mapping(out, map, indent),
-        Value::Seq(_) => emit_flow_value(out, &node.value),
+        Value::Map(map) if !map.is_empty() => emit_compact_mapping(out, map, indent),
+        Value::Seq(_) | Value::Map(_) => emit_flow_value(out, &node.value),
         _ => emit_value(out, &node.value, indent, false),
     }
 }
@@ -143,10 +165,10 @@ fn emit_compact_mapping(
         emit_map_key(out, key);
         out.push(':');
 
-        if value_node.value.is_collection() {
+        if needs_block(&value_node.value) {
             emit_inline_comment(out, value_node.inline_comment.as_deref());
             out.push('\n');
-            emit_value(out, &value_node.value, indent, true);
+            emit_value(out, &value_node.value, indent + 2, true);
         } else {
             out.push(' ');
             emit_value(out, &value_node.value, indent, false);
@@ -164,15 +186,7 @@ fn emit_flow_value(out: &mut String, value: &Value) {
         Value::Int(i) => {
             let _ = write!(out, "{i}");
         }
-        Value::Float(f) => {
-            if f.is_nan() {
-                out.push_str("nan");
-            } else if f.is_infinite() {
-                out.push_str(if f.is_sign_negative() { "-inf" } else { "inf" });
-            } else {
-                let _ = write!(out, "{f}");
-            }
-        }
+        Value::Float(f) => emit_float(out, *f),
         Value::Str(s) => {
             out.push('"');
             for ch in s.chars() {
@@ -292,6 +306,10 @@ fn needs_quoting(s: &str) -> bool {
     }
     // If it looks like a number, quote it
     if s.parse::<i64>().is_ok() || s.parse::<f64>().is_ok() {
+        return true;
+    }
+    // Leading/trailing whitespace
+    if s.starts_with(' ') || s.ends_with(' ') {
         return true;
     }
     // Contains characters that would cause issues
