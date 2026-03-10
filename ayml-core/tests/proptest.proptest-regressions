@@ -1,0 +1,10 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc ba493a368815f9f5069e86f97fd4ea58774a3b0d7218ef177d02c6a1071c7aa9 # shrinks to node = Node { comment: None, inline_comment: None, value: Seq([]) }
+cc 09852a244f548633bd2050266d1a636445eee2a0f95aa168138652664f176994 # shrinks to node = Node { comment: None, inline_comment: None, value: Str("A ") }
+cc 0da9e6e54141bd53553c53bca0606898f64f9317cb269bc36d515c5789b35528 # shrinks to node = Node { comment: None, inline_comment: None, value: Seq([Node { comment: None, inline_comment: None, value: Seq([Node { comment: None, inline_comment: None, value: Float(0.0) }]) }]) }
+cc 4294057dd1c83caaf89547f2eb0ef280e62587bc9299e9eba78b52b00abab577 # shrinks to node = Node { comment: None, inline_comment: None, value: Seq([Node { comment: None, inline_comment: None, value: Map({}) }]) }
