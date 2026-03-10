@@ -79,20 +79,18 @@ fn values_equal(a: &Value, b: &Value) -> bool {
         (Value::Null, Value::Null) => true,
         (Value::Bool(a), Value::Bool(b)) => a == b,
         (Value::Int(a), Value::Int(b)) => a == b,
-        (Value::Float(a), Value::Float(b)) => {
-            (a.is_nan() && b.is_nan()) || a == b
-        }
+        (Value::Float(a), Value::Float(b)) => (a.is_nan() && b.is_nan()) || a == b,
         (Value::Str(a), Value::Str(b)) => a == b,
         (Value::Seq(a), Value::Seq(b)) => {
             a.len() == b.len()
-                && a.iter().zip(b).all(|(a, b)| values_equal(&a.value, &b.value))
+                && a.iter()
+                    .zip(b)
+                    .all(|(a, b)| values_equal(&a.value, &b.value))
         }
         (Value::Map(a), Value::Map(b)) => {
             a.len() == b.len()
-                && a.iter().all(|(k, v)| {
-                    b.get(k)
-                        .is_some_and(|bv| values_equal(&v.value, &bv.value))
-                })
+                && a.iter()
+                    .all(|(k, v)| b.get(k).is_some_and(|bv| values_equal(&v.value, &bv.value)))
         }
         _ => false,
     }
