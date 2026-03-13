@@ -25,6 +25,7 @@ const fn is_hard_error(e: &Error) -> bool {
             | ErrorKind::IntegerOverflow
             | ErrorKind::UnexpectedEof
             | ErrorKind::RecursionLimit
+            | ErrorKind::TabIndent
     )
 }
 
@@ -132,7 +133,9 @@ impl<'a> Parser<'a> {
             // Allow blank lines between comment lines
             self.skip_blank_lines();
 
-            let spaces = self.scanner.count_spaces();
+            // Tab in indentation here just means "not a comment line" —
+            // the tab will be rejected by the main parse path.
+            let spaces = self.scanner.count_spaces().unwrap_or(0);
             // l-comment(n): comment indent must be <= n, and line must start with `#`
             if self.scanner.peek_nth(spaces) != Some('#') {
                 self.scanner.offset = saved;
@@ -237,8 +240,11 @@ impl<'a> Parser<'a> {
             }
             self.scanner.offset = saved;
 
-            // Try comment line
-            let spaces = self.scanner.count_spaces();
+            // Try comment line — tab here means "not a comment", stop.
+            let spaces = match self.scanner.count_spaces() {
+                Ok(n) => n,
+                Err(_) => break,
+            };
             if self.scanner.peek_nth(spaces) == Some('#') {
                 self.scanner.eat_spaces(spaces);
                 self.scanner.advance(); // `#`
@@ -383,7 +389,7 @@ impl<'a> Parser<'a> {
             }
 
             // Check if this line is the closing `"""`
-            let spaces = self.scanner.count_spaces();
+            let spaces = self.scanner.count_spaces()?;
 
             // Peek ahead: is this `<indent>"""`?
             let after_spaces = &self.scanner.input[self.scanner.offset + spaces..];
@@ -757,7 +763,7 @@ impl<'a> Parser<'a> {
     /// Try to parse a block sequence at indentation n.
     fn try_block_sequence(&mut self, n: usize) -> Result<Option<Node>, Error> {
         // Check if the current line starts with `- ` at indent n
-        let spaces = self.scanner.count_spaces();
+        let spaces = self.scanner.count_spaces()?;
         if spaces < n {
             return Ok(None);
         }
@@ -819,7 +825,7 @@ impl<'a> Parser<'a> {
                 // Not at a line break and not EOF — if we're at column 0-ish
                 // (start of line), the compact mapping already ate the break.
                 // Check if we're at the start of potential next content.
-                let spaces = self.scanner.count_spaces();
+                let spaces = self.scanner.count_spaces()?;
                 if spaces == n {
                     let rest = &self.scanner.input[self.scanner.offset + n..];
                     if rest.starts_with("- ") {
@@ -833,7 +839,7 @@ impl<'a> Parser<'a> {
             pending_comment = self.skip_block_gaps(n);
 
             // Peek ahead to see if the next line is another seq entry
-            let spaces = self.scanner.count_spaces();
+            let spaces = self.scanner.count_spaces()?;
             if spaces == n {
                 let rest = &self.scanner.input[self.scanner.offset + n..];
                 if rest.starts_with("- ") {
@@ -894,7 +900,7 @@ impl<'a> Parser<'a> {
             if !self.scanner.is_eof() && !self.scanner.eat_break() {
                 // Collection value may have already consumed the line break.
                 // Check if we're at the right indent to continue.
-                let spaces = self.scanner.count_spaces();
+                let spaces = self.scanner.count_spaces()?;
                 if spaces != n {
                     break;
                 }
@@ -904,7 +910,7 @@ impl<'a> Parser<'a> {
                 break;
             }
             let comment = self.skip_block_gaps(n);
-            let spaces = self.scanner.count_spaces();
+            let spaces = self.scanner.count_spaces()?;
             if spaces != n {
                 break;
             }
@@ -953,7 +959,7 @@ impl<'a> Parser<'a> {
         let saved = self.scanner.offset;
 
         // Detect indentation
-        let spaces = self.scanner.count_spaces();
+        let spaces = self.scanner.count_spaces()?;
         if spaces < n {
             return Ok(None);
         }
@@ -1032,7 +1038,7 @@ impl<'a> Parser<'a> {
             // (indented values like sequences consume their own line breaks).
             if !self.scanner.is_eof() && !self.scanner.eat_break() {
                 // Check if we're already at the start of the next entry
-                let spaces = self.scanner.count_spaces();
+                let spaces = self.scanner.count_spaces()?;
                 if spaces == n {
                     let rest = &self.scanner.input[self.scanner.offset + n..];
                     if !rest.starts_with("- ") {
@@ -1046,7 +1052,7 @@ impl<'a> Parser<'a> {
             let _comment = self.skip_block_gaps(n);
 
             // Check for next entry at same indent
-            let spaces = self.scanner.count_spaces();
+            let spaces = self.scanner.count_spaces()?;
             if spaces == n {
                 // Peek: is this another mapping entry?
                 let rest = &self.scanner.input[self.scanner.offset + n..];
@@ -1117,7 +1123,7 @@ impl<'a> Parser<'a> {
         let comment = self.skip_block_gaps(n);
 
         // Auto-detect indentation
-        let m = self.scanner.count_spaces();
+        let m = self.scanner.count_spaces()?;
 
         // Try block sequence first — sequences are allowed at m >= n
         // because `- ` provides implicit nesting (+2).

@@ -91,17 +91,20 @@ impl<'a> Scanner<'a> {
     }
 
     /// Count leading spaces at the current position without consuming them.
-    pub fn count_spaces(&self) -> usize {
+    /// Returns an error if a tab is found in the indentation region.
+    pub fn count_spaces(&self) -> Result<usize, Error> {
         let mut count = 0;
         let slice = &self.bytes[self.offset..];
         for &b in slice {
             if b == b' ' {
                 count += 1;
+            } else if b == b'\t' {
+                return Err(self.error_at(ErrorKind::TabIndent, self.offset + count));
             } else {
                 break;
             }
         }
-        count
+        Ok(count)
     }
 
     /// Consume exactly `n` spaces. Returns false (and does not advance) if

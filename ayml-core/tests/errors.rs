@@ -125,3 +125,33 @@ fn error_has_line_column() {
     assert!(err.line >= 1);
     assert!(err.column >= 1);
 }
+
+#[test]
+fn tab_indent_in_mapping_value() {
+    let input = "outer:\n\tinner: 1";
+    let err = parse(input).unwrap_err();
+    assert!(matches!(err.kind, ErrorKind::TabIndent));
+    assert_eq!(err.line, 2);
+    assert_eq!(err.column, 1);
+}
+
+#[test]
+fn tab_indent_in_sequence() {
+    let input = "items:\n\t- one";
+    let err = parse(input).unwrap_err();
+    assert!(matches!(err.kind, ErrorKind::TabIndent));
+}
+
+#[test]
+fn tab_indent_at_top_level() {
+    let input = "\tkey: val";
+    let err = parse(input).unwrap_err();
+    assert!(matches!(err.kind, ErrorKind::TabIndent));
+}
+
+#[test]
+fn tab_after_spaces_in_indent() {
+    let input = "outer:\n  \tinner: 1";
+    let err = parse(input).unwrap_err();
+    assert!(matches!(err.kind, ErrorKind::TabIndent));
+}
