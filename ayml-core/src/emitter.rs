@@ -309,7 +309,7 @@ fn needs_quoting(s: &str) -> bool {
         return true;
     }
     // Control characters
-    if s.chars().any(|c| c.is_control()) {
+    if s.chars().any(char::is_control) {
         return true;
     }
     // Contains characters that would cause issues
