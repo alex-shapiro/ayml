@@ -314,11 +314,16 @@ fn needs_quoting(s: &str) -> bool {
     }
     // Contains characters that would cause issues
     s.contains(": ")
+        || s.ends_with(':')
         || s.contains(" #")
         || s.starts_with('#')
         || s.starts_with('-')
+        || s.starts_with(':')
         || s.starts_with('[')
+        || s.starts_with(']')
         || s.starts_with('{')
+        || s.starts_with('}')
+        || s.starts_with(',')
         || s.starts_with('"')
         || s.contains('\\')
 }

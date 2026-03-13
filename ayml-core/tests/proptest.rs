@@ -6,25 +6,57 @@ use proptest::prelude::*;
 fn arb_map_key() -> impl Strategy<Value = MapKey> {
     prop_oneof![
         any::<bool>().prop_map(MapKey::Bool),
-        any::<i64>().prop_map(MapKey::Int),
-        "[a-zA-Z_][a-zA-Z0-9_]{0,15}".prop_map(MapKey::String),
+        prop_oneof![
+            any::<i64>(),
+            Just(i64::MIN),
+            Just(i64::MAX),
+            Just(0_i64),
+        ]
+        .prop_map(MapKey::Int),
+        prop_oneof![
+            "[a-zA-Z_][a-zA-Z0-9_]{0,15}",
+            // Keys that need quoting
+            Just(String::new()),
+            Just("null".into()),
+            Just("true".into()),
+            Just("false".into()),
+            Just("42".into()),
+            Just("with: colon".into()),
+            Just("has #hash".into()),
+            Just("back\\slash".into()),
+        ]
+        .prop_map(MapKey::String),
     ]
 }
 
 /// Generate a random string that is safe for AYML bare or quoted scalars.
-/// Avoids control characters and newlines (which would need triple-quoting
-/// and complicate round-trip comparison).
 fn arb_scalar_string() -> impl Strategy<Value = String> {
     prop_oneof![
-        // Simple alphanumeric
+        // Simple alphanumeric (bare strings)
         "[a-zA-Z][a-zA-Z0-9 _-]{0,30}",
-        // Strings that need quoting (contain special chars)
-        "\"[a-zA-Z0-9 :{}\\[\\]#,]{0,20}\"",
+        // Strings containing special chars that force quoting
+        "[a-zA-Z0-9 :{}\\[\\]#,]{1,20}",
         // Empty string (needs quoting)
         Just(String::new()),
-        // Strings that look like reserved words
-        Just("not_null".into()),
-        Just("truthy".into()),
+        // Reserved words (must round-trip as strings, not parsed values)
+        Just("null".into()),
+        Just("true".into()),
+        Just("false".into()),
+        Just("inf".into()),
+        Just("+inf".into()),
+        Just("-inf".into()),
+        Just("nan".into()),
+        // Strings that look like numbers
+        Just("42".into()),
+        Just("3.14".into()),
+        Just("-7".into()),
+        // Strings with control characters
+        Just("tab\there".into()),
+        Just("cr\rhere".into()),
+        // Multiline strings (exercises triple-quoting)
+        Just("line one\nline two".into()),
+        Just("trailing newline\n".into()),
+        Just("three\nlines\nhere".into()),
     ]
 }
 
@@ -50,6 +82,17 @@ fn arb_value(depth: u32) -> impl Strategy<Value = Value> {
             Just(Value::Float(f64::INFINITY)),
             Just(Value::Float(f64::NEG_INFINITY)),
             Just(Value::Float(f64::NAN)),
+            Just(Value::Float(0.0)),
+            Just(Value::Float(-0.0)),
+            Just(Value::Float(1.0)),
+            Just(Value::Float(-1.0)),
+            Just(Value::Float(1e20)),
+            Just(Value::Float(-1e20)),
+            Just(Value::Float(1.5e-10)),
+            Just(Value::Float(-1.5e-10)),
+            Just(Value::Float(f64::MAX)),
+            Just(Value::Float(f64::MIN)),
+            Just(Value::Float(f64::MIN_POSITIVE)),
         ],
         arb_scalar_string().prop_map(Value::Str),
     ];
