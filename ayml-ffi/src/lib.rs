@@ -199,9 +199,8 @@ pub unsafe extern "C" fn ayml_node_string(
     match &node.value {
         Value::Str(s) => match CString::new(s.as_str()) {
             Ok(cs) => {
-                let ptr = cs.as_ptr();
                 doc.strings.push(cs);
-                ptr
+                doc.strings.last().unwrap().as_ptr()
             }
             Err(_) => ptr::null(),
         },
