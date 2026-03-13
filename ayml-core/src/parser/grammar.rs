@@ -649,27 +649,33 @@ impl<'a> Parser<'a> {
     }
 
     /// Try to parse a string as an AYML integer.
+    ///
+    /// Parses the magnitude as `u64` then applies the sign via `i128`,
+    /// so that `i64::MIN` is representable in all radixes.
     fn try_parse_int(s: &str) -> Option<i64> {
-        let (s, negative) = match s.strip_prefix('-') {
+        let (unsigned, negative) = match s.strip_prefix('-') {
             Some(rest) => (rest, true),
             None => (s.strip_prefix('+').unwrap_or(s), false),
         };
 
-        let value = if let Some(bin) = s.strip_prefix("0b") {
-            i64::from_str_radix(bin, 2).ok()?
-        } else if let Some(oct) = s.strip_prefix("0o") {
-            i64::from_str_radix(oct, 8).ok()?
-        } else if let Some(hex) = s.strip_prefix("0x") {
-            i64::from_str_radix(hex, 16).ok()?
+        let abs = if let Some(bin) = unsigned.strip_prefix("0b") {
+            u64::from_str_radix(bin, 2).ok()?
+        } else if let Some(oct) = unsigned.strip_prefix("0o") {
+            u64::from_str_radix(oct, 8).ok()?
+        } else if let Some(hex) = unsigned.strip_prefix("0x") {
+            u64::from_str_radix(hex, 16).ok()?
         } else {
-            // Must be all digits
-            if s.is_empty() || !s.chars().all(|c| c.is_ascii_digit()) {
+            if unsigned.is_empty() || !unsigned.chars().all(|c| c.is_ascii_digit()) {
                 return None;
             }
-            s.parse::<i64>().ok()?
+            unsigned.parse::<u64>().ok()?
         };
 
-        Some(if negative { -value } else { value })
+        if negative {
+            i64::try_from(-i128::from(abs)).ok()
+        } else {
+            i64::try_from(abs).ok()
+        }
     }
 
     /// Try to parse a string as an AYML float.

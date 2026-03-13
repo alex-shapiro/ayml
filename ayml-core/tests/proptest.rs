@@ -33,7 +33,15 @@ fn arb_value(depth: u32) -> impl Strategy<Value = Value> {
     let leaf = prop_oneof![
         Just(Value::Null),
         any::<bool>().prop_map(Value::Bool),
-        any::<i64>().prop_map(Value::Int),
+        prop_oneof![
+            any::<i64>(),
+            Just(i64::MIN),
+            Just(i64::MAX),
+            Just(i64::MIN + 1),
+            Just(i64::MAX - 1),
+            Just(0_i64),
+        ]
+        .prop_map(Value::Int),
         // Use finite, non-subnormal floats that round-trip cleanly
         (-1e15_f64..1e15_f64)
             .prop_filter("finite and normal", |f| f.is_finite())

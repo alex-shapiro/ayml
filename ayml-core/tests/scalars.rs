@@ -83,6 +83,62 @@ fn integer_zero() {
     assert_eq!(map[&MapKey::String("n".into())].value, Value::Int(0));
 }
 
+#[test]
+fn integer_i64_max() {
+    let node = parse("n: 9223372036854775807").unwrap();
+    let map = node.value.as_mapping().unwrap();
+    assert_eq!(map[&MapKey::String("n".into())].value, Value::Int(i64::MAX));
+}
+
+#[test]
+fn integer_i64_min() {
+    let node = parse("n: -9223372036854775808").unwrap();
+    let map = node.value.as_mapping().unwrap();
+    assert_eq!(map[&MapKey::String("n".into())].value, Value::Int(i64::MIN));
+}
+
+#[test]
+fn integer_overflow_becomes_string() {
+    let node = parse("n: 9223372036854775808").unwrap();
+    let map = node.value.as_mapping().unwrap();
+    assert_eq!(
+        map[&MapKey::String("n".into())].value,
+        Value::Str("9223372036854775808".into())
+    );
+}
+
+#[test]
+fn integer_negative_overflow_becomes_string() {
+    let node = parse("n: -9223372036854775809").unwrap();
+    let map = node.value.as_mapping().unwrap();
+    assert_eq!(
+        map[&MapKey::String("n".into())].value,
+        Value::Str("-9223372036854775809".into())
+    );
+}
+
+#[test]
+fn integer_hex_i64_min() {
+    let node = parse("n: -0x8000000000000000").unwrap();
+    let map = node.value.as_mapping().unwrap();
+    assert_eq!(map[&MapKey::String("n".into())].value, Value::Int(i64::MIN));
+}
+
+#[test]
+fn integer_octal_i64_min() {
+    let node = parse("n: -0o1000000000000000000000").unwrap();
+    let map = node.value.as_mapping().unwrap();
+    assert_eq!(map[&MapKey::String("n".into())].value, Value::Int(i64::MIN));
+}
+
+#[test]
+fn integer_binary_i64_min() {
+    let node =
+        parse("n: -0b1000000000000000000000000000000000000000000000000000000000000000").unwrap();
+    let map = node.value.as_mapping().unwrap();
+    assert_eq!(map[&MapKey::String("n".into())].value, Value::Int(i64::MIN));
+}
+
 // ── Floats ───────────────────────────────────────────────────────
 
 #[test]
