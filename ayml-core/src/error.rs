@@ -100,14 +100,14 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}:{}: ", self.line, self.column)?;
         match &self.kind {
-            ErrorKind::UnexpectedChar(c) => write!(f, "unexpected character {c:?}"),
+            ErrorKind::UnexpectedChar(c) => write!(f, "unexpected character '{c}'"),
             ErrorKind::UnexpectedEof => write!(f, "unexpected end of input"),
-            ErrorKind::InvalidEscape(s) => write!(f, "invalid escape sequence: {s}"),
+            ErrorKind::InvalidEscape(s) => write!(f, "invalid escape sequence: '{s}'"),
             ErrorKind::TabIndent => write!(f, "tabs must not be used for indentation"),
-            ErrorKind::DuplicateKey(k) => write!(f, "duplicate mapping key: {k}"),
+            ErrorKind::DuplicateKey(k) => write!(f, "duplicate mapping key: '{k}'"),
             ErrorKind::NullKey => write!(f, "null cannot be used as a mapping key"),
             ErrorKind::FloatKey => write!(f, "float cannot be used as a mapping key"),
-            ErrorKind::Expected(what) => write!(f, "expected {what}"),
+            ErrorKind::Expected(what) => write!(f, "expected '{what}'"),
             ErrorKind::ByteOrderMark => write!(f, "byte order mark is not allowed"),
             ErrorKind::NonPrintable(c) => {
                 write!(f, "non-printable character U+{:04X}", *c as u32)
