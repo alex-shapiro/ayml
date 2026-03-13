@@ -141,7 +141,7 @@ impl ser::Serializer for ValueSerializer {
         value: &T,
     ) -> Result<Value, SerError> {
         let v = value.serialize(ValueSerializer)?;
-        let mut map = std::collections::HashMap::new();
+        let mut map = indexmap::IndexMap::new();
         map.insert(MapKey::String(variant.to_string()), Node::new(v));
         Ok(Value::Map(map))
     }
@@ -176,14 +176,14 @@ impl ser::Serializer for ValueSerializer {
 
     fn serialize_map(self, _len: Option<usize>) -> Result<MapSerializer, SerError> {
         Ok(MapSerializer {
-            map: std::collections::HashMap::new(),
+            map: indexmap::IndexMap::new(),
             current_key: None,
         })
     }
 
     fn serialize_struct(self, _name: &'static str, _len: usize) -> Result<MapSerializer, SerError> {
         Ok(MapSerializer {
-            map: std::collections::HashMap::new(),
+            map: indexmap::IndexMap::new(),
             current_key: None,
         })
     }
@@ -196,7 +196,7 @@ impl ser::Serializer for ValueSerializer {
         _len: usize,
     ) -> Result<MapSerializer, SerError> {
         Ok(MapSerializer {
-            map: std::collections::HashMap::new(),
+            map: indexmap::IndexMap::new(),
             current_key: None,
         })
     }
@@ -261,7 +261,7 @@ impl ser::SerializeTupleVariant for SeqSerializer {
 }
 
 struct MapSerializer {
-    map: std::collections::HashMap<MapKey, Node>,
+    map: indexmap::IndexMap<MapKey, Node>,
     current_key: Option<MapKey>,
 }
 

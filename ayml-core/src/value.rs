@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use indexmap::IndexMap;
 use std::fmt;
 
 /// A node in the AYML document tree.
@@ -68,7 +68,7 @@ pub enum Value {
     Float(f64),
     Str(String),
     Seq(Vec<Node>),
-    Map(HashMap<MapKey, Node>),
+    Map(IndexMap<MapKey, Node>),
 }
 
 impl Value {
@@ -128,7 +128,7 @@ impl Value {
     }
 
     #[must_use]
-    pub const fn as_mapping(&self) -> Option<&HashMap<MapKey, Node>> {
+    pub fn as_mapping(&self) -> Option<&IndexMap<MapKey, Node>> {
         match self {
             Self::Map(m) => Some(m),
             _ => None,

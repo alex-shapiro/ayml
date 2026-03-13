@@ -6,9 +6,16 @@ use ayml_core::{Node, Value};
 /// Opaque handle to a parsed AYML document.
 pub struct AymlDocument {
     root: Node,
+    /// CStrings returned by `ayml_node_string`, freed when the document is freed.
+    strings: Vec<CString>,
 }
 
 /// Opaque handle to an AYML node (borrowed from a document).
+///
+/// # Safety
+/// The underlying pointer is borrowed from an `AymlDocument`. The node becomes
+/// invalid once the document is freed via `ayml_free`. Callers must ensure the
+/// document outlives all nodes obtained from it.
 pub struct AymlNode {
     node: *const Node,
 }
@@ -42,7 +49,10 @@ pub unsafe extern "C" fn ayml_parse(input: *const c_char) -> *mut AymlDocument {
     };
 
     match ayml_core::parse(s) {
-        Ok(root) => Box::into_raw(Box::new(AymlDocument { root })),
+        Ok(root) => Box::into_raw(Box::new(AymlDocument {
+            root,
+            strings: Vec::new(),
+        })),
         Err(_) => ptr::null_mut(),
     }
 }
@@ -51,6 +61,7 @@ pub unsafe extern "C" fn ayml_parse(input: *const c_char) -> *mut AymlDocument {
 ///
 /// # Safety
 /// `doc` must be a pointer returned by `ayml_parse`, or null.
+/// All `AymlNode` handles obtained from this document become invalid after this call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ayml_free(doc: *mut AymlDocument) {
     if !doc.is_null() {
@@ -62,6 +73,7 @@ pub unsafe extern "C" fn ayml_free(doc: *mut AymlDocument) {
 ///
 /// # Safety
 /// `doc` must be a valid pointer returned by `ayml_parse`.
+/// The returned node is only valid while the document is alive.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ayml_root(doc: *const AymlDocument) -> *const AymlNode {
     if doc.is_null() {
@@ -172,22 +184,27 @@ pub unsafe extern "C" fn ayml_node_float(node: *const AymlNode, ok: *mut i32) ->
 /// is valid until the document is freed.
 ///
 /// # Safety
-/// `node` must be a valid node pointer.
+/// `node` must be a valid node pointer. `doc` must be the document this node
+/// belongs to (used to tie the string's lifetime to the document).
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn ayml_node_string(node: *const AymlNode) -> *const c_char {
-    if node.is_null() {
+pub unsafe extern "C" fn ayml_node_string(
+    doc: *mut AymlDocument,
+    node: *const AymlNode,
+) -> *const c_char {
+    if node.is_null() || doc.is_null() {
         return ptr::null();
     }
     let node = unsafe { &*(*node).node };
+    let doc = unsafe { &mut *doc };
     match &node.value {
-        Value::Str(s) => {
-            // Leak a CString — caller must not free this; it lives as long as the doc.
-            // TODO: better lifetime management. For now, this leaks.
-            match CString::new(s.as_str()) {
-                Ok(cs) => cs.into_raw() as *const c_char,
-                Err(_) => ptr::null(),
+        Value::Str(s) => match CString::new(s.as_str()) {
+            Ok(cs) => {
+                let ptr = cs.as_ptr();
+                doc.strings.push(cs);
+                ptr
             }
-        }
+            Err(_) => ptr::null(),
+        },
         _ => ptr::null(),
     }
 }

@@ -49,6 +49,8 @@ pub enum ErrorKind {
     NonPrintable(char),
     /// An integer literal that overflows i64.
     IntegerOverflow,
+    /// Nesting depth exceeded the configured limit.
+    RecursionLimit,
 }
 
 /// A parse or emit error with location information.
@@ -111,6 +113,7 @@ impl fmt::Display for Error {
                 write!(f, "non-printable character U+{:04X}", *c as u32)
             }
             ErrorKind::IntegerOverflow => write!(f, "integer literal overflows i64"),
+            ErrorKind::RecursionLimit => write!(f, "nesting depth exceeds recursion limit"),
         }
     }
 }

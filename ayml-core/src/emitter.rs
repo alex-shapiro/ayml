@@ -107,7 +107,7 @@ fn emit_sequence(out: &mut String, entries: &[Node], indent: usize) {
     }
 }
 
-fn emit_mapping(out: &mut String, map: &std::collections::HashMap<MapKey, Node>, indent: usize) {
+fn emit_mapping(out: &mut String, map: &indexmap::IndexMap<MapKey, Node>, indent: usize) {
     for (key, value_node) in map {
         emit_comment(out, value_node.comment.as_deref(), indent);
 
@@ -146,11 +146,7 @@ fn emit_seq_entry_value(out: &mut String, node: &Node, indent: usize) {
     }
 }
 
-fn emit_compact_mapping(
-    out: &mut String,
-    map: &std::collections::HashMap<MapKey, Node>,
-    indent: usize,
-) {
+fn emit_compact_mapping(out: &mut String, map: &indexmap::IndexMap<MapKey, Node>, indent: usize) {
     let mut first = true;
     for (key, value_node) in map {
         if !first {
@@ -310,6 +306,10 @@ fn needs_quoting(s: &str) -> bool {
     }
     // Leading/trailing whitespace
     if s.starts_with(' ') || s.ends_with(' ') {
+        return true;
+    }
+    // Control characters
+    if s.chars().any(|c| c.is_control()) {
         return true;
     }
     // Contains characters that would cause issues

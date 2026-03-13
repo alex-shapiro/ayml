@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use indexmap::IndexMap;
 
 use super::scanner::Scanner;
 use crate::error::{Error, ErrorKind, Span};
@@ -24,6 +24,7 @@ const fn is_hard_error(e: &Error) -> bool {
             | ErrorKind::ByteOrderMark
             | ErrorKind::IntegerOverflow
             | ErrorKind::UnexpectedEof
+            | ErrorKind::RecursionLimit
     )
 }
 
@@ -53,18 +54,42 @@ impl RawMapKey {
     }
 }
 
+/// Default maximum nesting depth for the parser.
+pub const DEFAULT_MAX_DEPTH: usize = 128;
+
 /// Recursive descent parser for AYML.
 ///
 /// Method names mirror the BNF production names from the spec where possible.
 pub struct Parser<'a> {
     scanner: Scanner<'a>,
+    depth: usize,
+    max_depth: usize,
 }
 
 impl<'a> Parser<'a> {
     pub const fn new(input: &'a str) -> Self {
         Self {
             scanner: Scanner::new(input),
+            depth: 0,
+            max_depth: DEFAULT_MAX_DEPTH,
         }
+    }
+
+    pub const fn with_max_depth(mut self, max_depth: usize) -> Self {
+        self.max_depth = max_depth;
+        self
+    }
+
+    fn enter_nested(&mut self) -> Result<(), Error> {
+        self.depth += 1;
+        if self.depth > self.max_depth {
+            return Err(self.scanner.error(ErrorKind::RecursionLimit));
+        }
+        Ok(())
+    }
+
+    fn leave_nested(&mut self) {
+        self.depth -= 1;
     }
 
     /// l-ayml-document
@@ -232,6 +257,13 @@ impl<'a> Parser<'a> {
 
     /// ns-block-node(n) — a block sequence, block mapping, or flow node.
     fn parse_block_node(&mut self, n: usize) -> Result<Node, Error> {
+        self.enter_nested()?;
+        let result = self.parse_block_node_inner(n);
+        self.leave_nested();
+        result
+    }
+
+    fn parse_block_node_inner(&mut self, n: usize) -> Result<Node, Error> {
         // Try block sequence
         if let Some(node) = self.try_block_sequence(n)? {
             return Ok(node);
@@ -248,6 +280,13 @@ impl<'a> Parser<'a> {
 
     /// ns-flow-node(c) — a scalar or flow collection.
     fn parse_flow_node(&mut self, ctx: Context) -> Result<Node, Error> {
+        self.enter_nested()?;
+        let result = self.parse_flow_node_inner(ctx);
+        self.leave_nested();
+        result
+    }
+
+    fn parse_flow_node_inner(&mut self, ctx: Context) -> Result<Node, Error> {
         match self.scanner.peek() {
             Some('[') => self.parse_flow_sequence(),
             Some('{') => self.parse_flow_mapping(),
@@ -840,7 +879,7 @@ impl<'a> Parser<'a> {
         // Confirmed mapping — now validate the key
         let key = raw_key.validate(self.scanner.source(), self.scanner.offset)?;
 
-        let mut map = HashMap::new();
+        let mut map = IndexMap::new();
         let value_node = self.parse_mapping_value(n)?;
         map.insert(key, value_node);
 
@@ -937,8 +976,8 @@ impl<'a> Parser<'a> {
     }
 
     /// l-block-mapping(n)
-    fn parse_block_mapping(&mut self, n: usize) -> Result<HashMap<MapKey, Node>, Error> {
-        let mut map = HashMap::new();
+    fn parse_block_mapping(&mut self, n: usize) -> Result<IndexMap<MapKey, Node>, Error> {
+        let mut map = IndexMap::new();
 
         loop {
             // l-block-mapping-entry(n)
@@ -1054,6 +1093,13 @@ impl<'a> Parser<'a> {
 
     /// Parse an indented value appearing on lines after a mapping key.
     fn parse_indented_value(&mut self, n: usize) -> Result<Node, Error> {
+        self.enter_nested()?;
+        let result = self.parse_indented_value_inner(n);
+        self.leave_nested();
+        result
+    }
+
+    fn parse_indented_value_inner(&mut self, n: usize) -> Result<Node, Error> {
         // Consume the line break
         if !self.scanner.eat_break() && !self.scanner.is_eof() {
             return Err(self.scanner.error(ErrorKind::Expected(
@@ -1250,7 +1296,7 @@ impl<'a> Parser<'a> {
         self.scanner.advance(); // `{`
         self.skip_flow_whitespace();
 
-        let mut map = HashMap::new();
+        let mut map = IndexMap::new();
 
         if self.scanner.peek() != Some('}') {
             let (key, value) = self.parse_flow_mapping_entry()?;

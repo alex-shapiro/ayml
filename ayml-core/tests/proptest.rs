@@ -1,6 +1,6 @@
 use ayml_core::{MapKey, Node, Value};
+use indexmap::IndexMap;
 use proptest::prelude::*;
-use std::collections::HashMap;
 
 /// Generate a random MapKey.
 fn arb_map_key() -> impl Strategy<Value = MapKey> {
@@ -60,7 +60,7 @@ fn arb_value(depth: u32) -> impl Strategy<Value = Value> {
                     0..5
                 )
                 .prop_map(|entries| {
-                    let map: HashMap<MapKey, Node> = entries.into_iter().collect();
+                    let map: IndexMap<MapKey, Node> = entries.into_iter().collect();
                     Value::Map(map)
                 }),
         ]

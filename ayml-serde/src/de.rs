@@ -97,12 +97,12 @@ impl<'de, 'a> SeqAccess<'de> for SeqDeserializer<'a> {
 }
 
 struct MapDeserializer<'a> {
-    iter: std::collections::hash_map::Iter<'a, MapKey, Node>,
+    iter: indexmap::map::Iter<'a, MapKey, Node>,
     current_value: Option<&'a Node>,
 }
 
 impl<'a> MapDeserializer<'a> {
-    fn new(map: &'a std::collections::HashMap<MapKey, Node>) -> Self {
+    fn new(map: &'a indexmap::IndexMap<MapKey, Node>) -> Self {
         Self {
             iter: map.iter(),
             current_value: None,
