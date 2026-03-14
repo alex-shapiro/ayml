@@ -802,9 +802,50 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
         self,
         _name: &'static str,
         _variants: &'static [&'static str],
-        _visitor: V,
+        visitor: V,
     ) -> Result<V::Value> {
-        todo!()
+        self.skip_whitespace_and_comments()?;
+        match self.peek()? {
+            Some('{') => {
+                // Flow mapping: {VariantName: value}
+                self.advance()?; // eat '{'
+                let prev_ctx = self.ctx;
+                self.ctx = Context::Flow;
+                self.skip_whitespace_and_comments()?;
+                let value = visitor.visit_enum(EnumAccess {
+                    de: self,
+                    style: EnumStyle::Mapping,
+                })?;
+                self.skip_whitespace_and_comments()?;
+                if !self.eat('}')? {
+                    return Err(self.error("expected `}` to close enum mapping"));
+                }
+                self.ctx = prev_ctx;
+                Ok(value)
+            }
+            _ => {
+                // Could be a unit variant (bare string) or block mapping (key: value).
+                // Lookahead: scan the key, check for `: `.
+                let start = self.offset();
+                let _text = self.scan_scalar_string(self.ctx)?;
+                self.skip_inline_whitespace()?;
+                if self.is_mapping_value_indicator()? {
+                    // Block mapping style: VariantName: value
+                    self.set_offset(start);
+                    visitor.visit_enum(EnumAccess {
+                        de: self,
+                        style: EnumStyle::Mapping,
+                    })
+                } else {
+                    // Unit variant: just a bare string
+                    self.set_offset(start);
+                    visitor.visit_enum(EnumAccess {
+                        de: self,
+                        style: EnumStyle::Unit,
+                    })
+                }
+            }
+        }
     }
 
     fn deserialize_identifier<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
@@ -1024,6 +1065,80 @@ impl<'a, 'de, R: Read<'de>> de::MapAccess<'de> for MapAccess<'a, R> {
         // For flow mappings, ctx is already set to Flow by next_key_seed.
         // It will be restored to prev_ctx when next_key_seed detects `}`.
         seed.deserialize(&mut *self.de)
+    }
+}
+
+// ── EnumAccess / VariantAccess ────────────────────────────────────
+
+enum EnumStyle {
+    /// Unit variant: just a bare/quoted string (e.g. `Red`).
+    Unit,
+    /// Mapping variant: key: value (block) or inside `{ }` (flow).
+    Mapping,
+}
+
+struct EnumAccess<'a, R> {
+    de: &'a mut Deserializer<R>,
+    style: EnumStyle,
+}
+
+impl<'a, 'de, R: Read<'de>> de::EnumAccess<'de> for EnumAccess<'a, R> {
+    type Error = Error;
+    type Variant = VariantAccess<'a, R>;
+
+    fn variant_seed<V>(self, seed: V) -> Result<(V::Value, Self::Variant)>
+    where
+        V: de::DeserializeSeed<'de>,
+    {
+        match self.style {
+            EnumStyle::Unit => {
+                let variant = seed.deserialize(&mut *self.de)?;
+                Ok((variant, VariantAccess { de: self.de }))
+            }
+            EnumStyle::Mapping => {
+                // Read the variant name (key), then consume `:`
+                let variant = seed.deserialize(&mut *self.de)?;
+                self.de.skip_inline_whitespace()?;
+                if !self.de.eat(':')? {
+                    return Err(self.de.error("expected `:` after enum variant name"));
+                }
+                self.de.skip_inline_whitespace()?;
+                Ok((variant, VariantAccess { de: self.de }))
+            }
+        }
+    }
+}
+
+struct VariantAccess<'a, R> {
+    de: &'a mut Deserializer<R>,
+}
+
+impl<'a, 'de, R: Read<'de>> de::VariantAccess<'de> for VariantAccess<'a, R> {
+    type Error = Error;
+
+    fn unit_variant(self) -> Result<()> {
+        Ok(())
+    }
+
+    fn newtype_variant_seed<T>(self, seed: T) -> Result<T::Value>
+    where
+        T: de::DeserializeSeed<'de>,
+    {
+        seed.deserialize(self.de)
+    }
+
+    fn tuple_variant<V>(self, _len: usize, visitor: V) -> Result<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        de::Deserializer::deserialize_seq(self.de, visitor)
+    }
+
+    fn struct_variant<V>(self, _fields: &'static [&'static str], visitor: V) -> Result<V::Value>
+    where
+        V: Visitor<'de>,
+    {
+        de::Deserializer::deserialize_map(self.de, visitor)
     }
 }
 
@@ -1556,5 +1671,151 @@ mod tests {
 
         let data = b"\"hello\"" as &[u8];
         assert_eq!(from_reader::<_, String>(data).unwrap(), "hello");
+    }
+
+    // ── Enum tests ───────────────────────────────────────────────
+
+    #[test]
+    fn test_enum_unit_variant() {
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        enum Color {
+            Red,
+            Green,
+            Blue,
+        }
+        assert_eq!(from_str::<Color>("Red").unwrap(), Color::Red);
+        assert_eq!(from_str::<Color>("Green").unwrap(), Color::Green);
+        assert_eq!(from_str::<Color>("Blue").unwrap(), Color::Blue);
+    }
+
+    #[test]
+    fn test_enum_newtype_variant_flow() {
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        enum Shape {
+            Circle(f64),
+            Label(String),
+        }
+        assert_eq!(
+            from_str::<Shape>("{Circle: 3.14}").unwrap(),
+            Shape::Circle(3.14)
+        );
+        assert_eq!(
+            from_str::<Shape>("{Label: hello}").unwrap(),
+            Shape::Label("hello".to_string())
+        );
+    }
+
+    #[test]
+    fn test_enum_newtype_variant_block() {
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        enum Shape {
+            Circle(f64),
+        }
+        assert_eq!(
+            from_str::<Shape>("Circle: 3.14").unwrap(),
+            Shape::Circle(3.14)
+        );
+    }
+
+    #[test]
+    fn test_enum_tuple_variant_flow() {
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        enum Cmd {
+            Move(i32, i32),
+        }
+        assert_eq!(
+            from_str::<Cmd>("{Move: [10, 20]}").unwrap(),
+            Cmd::Move(10, 20)
+        );
+    }
+
+    #[test]
+    fn test_enum_tuple_variant_block() {
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        enum Cmd {
+            Move(i32, i32),
+        }
+        assert_eq!(
+            from_str::<Cmd>("Move: [10, 20]").unwrap(),
+            Cmd::Move(10, 20)
+        );
+    }
+
+    #[test]
+    fn test_enum_struct_variant_flow() {
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        enum Shape {
+            Rect { w: u32, h: u32 },
+        }
+        assert_eq!(
+            from_str::<Shape>("{Rect: {w: 10, h: 20}}").unwrap(),
+            Shape::Rect { w: 10, h: 20 }
+        );
+    }
+
+    #[test]
+    fn test_enum_struct_variant_block() {
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        enum Shape {
+            Rect { w: u32, h: u32 },
+        }
+        let input = "Rect:\n  w: 10\n  h: 20";
+        assert_eq!(
+            from_str::<Shape>(input).unwrap(),
+            Shape::Rect { w: 10, h: 20 }
+        );
+    }
+
+    #[test]
+    fn test_enum_unit_in_sequence() {
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        enum Color {
+            Red,
+            Blue,
+        }
+        let v: Vec<Color> = from_str("- Red\n- Blue").unwrap();
+        assert_eq!(v, vec![Color::Red, Color::Blue]);
+    }
+
+    #[test]
+    fn test_enum_in_struct_field() {
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        enum Status {
+            Active,
+            Inactive,
+        }
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        struct User {
+            name: String,
+            status: Status,
+        }
+        let u: User = from_str("name: Alice\nstatus: Active").unwrap();
+        assert_eq!(
+            u,
+            User {
+                name: "Alice".to_string(),
+                status: Status::Active,
+            }
+        );
+    }
+
+    #[test]
+    fn test_enum_option_variant() {
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        enum Value {
+            Num(i32),
+            None,
+        }
+        assert_eq!(from_str::<Value>("None").unwrap(), Value::None);
+        assert_eq!(from_str::<Value>("{Num: 42}").unwrap(), Value::Num(42));
+    }
+
+    #[test]
+    fn test_enum_quoted_variant() {
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        enum Color {
+            Red,
+        }
+        assert_eq!(from_str::<Color>(r#""Red""#).unwrap(), Color::Red);
     }
 }
