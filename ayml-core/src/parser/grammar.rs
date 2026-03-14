@@ -111,6 +111,9 @@ impl<'a> Parser<'a> {
             node.comment = comment;
         }
 
+        // Inline comment on same line as root node
+        node.inline_comment = node.inline_comment.or_else(|| self.parse_inline_comment());
+
         // Trailing content: blank lines and comments
         self.skip_trailing(0);
 
@@ -125,7 +128,7 @@ impl<'a> Parser<'a> {
 
     /// Parse a block of consecutive comment lines at indentation <= n.
     /// Returns the joined comment text (without `#` prefixes), or None.
-    fn parse_comment_block(&mut self, _n: usize) -> Option<String> {
+    fn parse_comment_block(&mut self, n: usize) -> Option<String> {
         let mut lines: Vec<String> = Vec::new();
 
         loop {
@@ -137,7 +140,7 @@ impl<'a> Parser<'a> {
             // the tab will be rejected by the main parse path.
             let spaces = self.scanner.count_spaces().unwrap_or(0);
             // l-comment(n): comment indent must be <= n, and line must start with `#`
-            if self.scanner.peek_nth(spaces) != Some('#') {
+            if spaces > n || self.scanner.peek_nth(spaces) != Some('#') {
                 self.scanner.offset = saved;
                 break;
             }
@@ -231,7 +234,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Skip trailing blank lines and comments after the root node.
-    fn skip_trailing(&mut self, _n: usize) {
+    fn skip_trailing(&mut self, n: usize) {
         loop {
             let saved = self.scanner.offset;
             self.scanner.skip_inline_whitespace();
@@ -242,10 +245,10 @@ impl<'a> Parser<'a> {
 
             // Try comment line — tab here means "not a comment", stop.
             let spaces = match self.scanner.count_spaces() {
-                Ok(n) => n,
+                Ok(s) => s,
                 Err(_) => break,
             };
-            if self.scanner.peek_nth(spaces) == Some('#') {
+            if spaces <= n && self.scanner.peek_nth(spaces) == Some('#') {
                 self.scanner.eat_spaces(spaces);
                 self.scanner.advance(); // `#`
                 let _ = self.scanner.rest_of_line();
