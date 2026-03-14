@@ -230,7 +230,7 @@ impl<'de, R: Read<'de>> Deserializer<R> {
                 b'\t' => {
                     return Err(
                         self.error_at("tabs not allowed for indentation", start_off + count)
-                    )
+                    );
                 }
                 _ => break,
             }
@@ -1462,12 +1462,19 @@ mod tests {
             name: String,
             qty: u32,
         }
-        let items: Vec<Item> = from_str("- name: Widget\n  qty: 5\n- name: Gadget\n  qty: 3").unwrap();
+        let items: Vec<Item> =
+            from_str("- name: Widget\n  qty: 5\n- name: Gadget\n  qty: 3").unwrap();
         assert_eq!(
             items,
             vec![
-                Item { name: "Widget".to_string(), qty: 5 },
-                Item { name: "Gadget".to_string(), qty: 3 },
+                Item {
+                    name: "Widget".to_string(),
+                    qty: 5
+                },
+                Item {
+                    name: "Gadget".to_string(),
+                    qty: 3
+                },
             ]
         );
     }
