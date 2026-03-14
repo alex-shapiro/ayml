@@ -519,7 +519,14 @@ impl<'a> Parser<'a> {
             Some(' ') => result.push(' '),
             Some('"') => result.push('"'),
             Some('/') => result.push('/'),
-            Some('\\') | None => result.push('\\'),
+            Some('\\') => result.push('\\'),
+            None => {
+                return Err(Error::new(
+                    ErrorKind::InvalidEscape("\\<eof>".into()),
+                    Span::point(start),
+                    source,
+                ));
+            }
             Some('x') => result.push(Self::take_hex(chars, 2)?),
             Some('u') => result.push(Self::take_hex(chars, 4)?),
             Some('U') => result.push(Self::take_hex(chars, 8)?),

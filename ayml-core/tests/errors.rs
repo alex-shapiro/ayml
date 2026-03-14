@@ -1,4 +1,4 @@
-use ayml_core::{ErrorKind, parse, parse_with_max_depth};
+use ayml_core::{ErrorKind, MapKey, Value, parse, parse_with_max_depth};
 
 #[test]
 fn duplicate_key() {
@@ -26,6 +26,29 @@ fn invalid_escape_in_double_quoted() {
     let input = r#"s: "\q""#;
     let err = parse(input).unwrap_err();
     assert!(matches!(err.kind, ErrorKind::InvalidEscape(_)));
+}
+
+#[test]
+fn line_continuation_in_triple_quoted() {
+    // `\` at end of line suppresses the line break, joining the next line
+    let input = "s: \"\"\"\n  hello \\\n  world\n  \"\"\"";
+    let node = parse(input).unwrap();
+    let map = node.value.as_mapping().unwrap();
+    assert_eq!(
+        map[&MapKey::String("s".into())].value,
+        Value::Str("hello world".into())
+    );
+}
+
+#[test]
+fn backslash_eof_in_triple_quoted_is_error() {
+    // A lone `\` followed immediately by EOF (malformed — no closing `"""`)
+    let input = "s: \"\"\"\n  hello\\";
+    let err = parse(input).unwrap_err();
+    // Should error (unclosed triple-quote), not silently emit a backslash
+    assert!(
+        matches!(err.kind, ErrorKind::UnexpectedEof | ErrorKind::Expected(_)),
+    );
 }
 
 #[test]
