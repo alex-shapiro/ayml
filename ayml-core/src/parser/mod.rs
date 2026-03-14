@@ -1,5 +1,5 @@
 mod grammar;
-mod scanner;
+pub mod scanner;
 
 use crate::error::Error;
 use crate::value::Node;

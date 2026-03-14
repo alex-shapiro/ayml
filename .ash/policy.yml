@@ -51,6 +51,8 @@ network:
   rules:
   - host: yaml.org
 exec:
-  rules: []
+  rules:
+  - path: /opt/homebrew/Cellar/tree/*/bin/tree
+    subcommand: '3'
 io_devices:
   rules: []

@@ -2,7 +2,7 @@ use crate::error::{Error, ErrorKind, Span};
 
 /// Low-level character scanner over the input string.
 ///
-/// Tracks byte offset, line, and column. Provides helpers for the character
+/// Tracks byte offset and provides helpers for the character
 /// productions defined in the spec (c-printable, b-break, s-white, etc.).
 pub struct Scanner<'a> {
     pub input: &'a str,
@@ -12,6 +12,7 @@ pub struct Scanner<'a> {
 }
 
 impl<'a> Scanner<'a> {
+    #[must_use]
     pub const fn new(input: &'a str) -> Self {
         Self {
             input,
@@ -21,21 +22,25 @@ impl<'a> Scanner<'a> {
     }
 
     /// The full source input (for error reporting).
+    #[must_use]
     pub const fn source(&self) -> &'a str {
         self.input
     }
 
     /// True if the scanner has reached the end of input.
+    #[must_use]
     pub const fn is_eof(&self) -> bool {
         self.offset >= self.input.len()
     }
 
     /// Peek at the current character without advancing.
+    #[must_use]
     pub fn peek(&self) -> Option<char> {
         self.input[self.offset..].chars().next()
     }
 
     /// Peek at the next n-th character (0 = current).
+    #[must_use]
     pub fn peek_nth(&self, n: usize) -> Option<char> {
         self.input[self.offset..].chars().nth(n)
     }
@@ -91,6 +96,8 @@ impl<'a> Scanner<'a> {
     }
 
     /// Count leading spaces at the current position without consuming them.
+    ///
+    /// # Errors
     /// Returns an error if a tab is found in the indentation region.
     pub fn count_spaces(&self) -> Result<usize, Error> {
         let mut count = 0;
@@ -131,21 +138,25 @@ impl<'a> Scanner<'a> {
     }
 
     /// True if the current character is a space or tab.
+    #[must_use]
     pub fn is_white(&self) -> bool {
         matches!(self.peek(), Some(' ' | '\t'))
     }
 
     /// True if the current character is a line break.
+    #[must_use]
     pub fn is_break(&self) -> bool {
         matches!(self.peek(), Some('\n' | '\r'))
     }
 
     /// True if the current character is a line break or EOF.
+    #[must_use]
     pub fn is_break_or_eof(&self) -> bool {
         self.is_eof() || self.is_break()
     }
 
     /// Check if a character is in the c-printable set per the spec.
+    #[must_use]
     pub const fn is_printable(ch: char) -> bool {
         let cp = ch as u32;
         matches!(cp,
@@ -159,17 +170,21 @@ impl<'a> Scanner<'a> {
     }
 
     /// Create an error at the current position.
+    #[must_use]
     pub fn error(&self, kind: ErrorKind) -> Error {
         Error::new(kind, Span::point(self.offset), self.input)
     }
 
     /// Create an error at a specific offset.
+    #[must_use]
     pub fn error_at(&self, kind: ErrorKind, offset: usize) -> Error {
         Error::new(kind, Span::point(offset), self.input)
     }
 
     /// Parse a double-quoted escape sequence (after consuming the `\`).
-    /// Returns the decoded character.
+    ///
+    /// # Errors
+    /// Returns an error if the escape sequence is invalid.
     pub fn parse_escape(&mut self) -> Result<char, Error> {
         let esc_start = self.offset - 1; // offset of the `\`
         match self.advance() {
