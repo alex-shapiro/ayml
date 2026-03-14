@@ -7,6 +7,8 @@ pub enum Error {
     Parse(ayml_core::Error),
     /// A custom message from serde or this crate.
     Message(String),
+    /// An I/O error (from `from_reader` / `to_writer`).
+    Io(std::io::Error),
 }
 
 impl fmt::Display for Error {
@@ -14,6 +16,7 @@ impl fmt::Display for Error {
         match self {
             Error::Parse(e) => write!(f, "{e}"),
             Error::Message(msg) => f.write_str(msg),
+            Error::Io(e) => write!(f, "I/O error: {e}"),
         }
     }
 }
@@ -23,6 +26,7 @@ impl std::error::Error for Error {
         match self {
             Error::Parse(e) => Some(e),
             Error::Message(_) => None,
+            Error::Io(e) => Some(e),
         }
     }
 }
@@ -42,6 +46,12 @@ impl serde::ser::Error for Error {
 impl From<ayml_core::Error> for Error {
     fn from(e: ayml_core::Error) -> Self {
         Error::Parse(e)
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Self {
+        Error::Io(e)
     }
 }
 

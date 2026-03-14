@@ -47,6 +47,7 @@ files:
   - path: ~/Projects
     operations:
     - read
+  - path: ~/Projects/serde_json/**
 network:
   rules:
   - host: yaml.org

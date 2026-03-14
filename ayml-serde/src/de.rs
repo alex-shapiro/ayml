@@ -4,7 +4,10 @@ use serde::de::{self, DeserializeOwned, Visitor};
 use crate::error::{Error, Result};
 
 /// Deserialize a `T` from a string of AYML text.
-pub fn from_str<T: DeserializeOwned>(s: &str) -> Result<T> {
+///
+/// The bound `T: Deserialize<'a>` (rather than `DeserializeOwned`) allows
+/// zero-copy deserialization of borrowed types like `&'a str`.
+pub fn from_str<'a, T: serde::Deserialize<'a>>(s: &'a str) -> Result<T> {
     let mut de = Deserializer::new(s);
     let value = T::deserialize(&mut de)?;
     de.end()?;
@@ -12,13 +15,24 @@ pub fn from_str<T: DeserializeOwned>(s: &str) -> Result<T> {
 }
 
 /// Deserialize a `T` from a slice of AYML bytes.
-pub fn from_slice<T: DeserializeOwned>(_bytes: &[u8]) -> Result<T> {
-    todo!()
+///
+/// AYML is UTF-8; this validates the input and then deserializes.
+/// Supports borrowing from the input slice (`T: Deserialize<'a>`).
+pub fn from_slice<'a, T: serde::Deserialize<'a>>(bytes: &'a [u8]) -> Result<T> {
+    let s =
+        std::str::from_utf8(bytes).map_err(|e| Error::Message(format!("invalid UTF-8: {e}")))?;
+    from_str(s)
 }
 
 /// Deserialize a `T` from an AYML reader.
-pub fn from_reader<R: std::io::Read, T: DeserializeOwned>(_rdr: R) -> Result<T> {
-    todo!()
+///
+/// Reads the entire input into memory (AYML's indentation-sensitive grammar
+/// requires random access). The deserialized value cannot borrow from the
+/// input; use [`from_str`] or [`from_slice`] for zero-copy deserialization.
+pub fn from_reader<R: std::io::Read, T: DeserializeOwned>(mut rdr: R) -> Result<T> {
+    let mut buf = String::new();
+    rdr.read_to_string(&mut buf)?;
+    from_str(&buf)
 }
 
 // ── Parsing context ──────────────────────────────────────────────
@@ -34,12 +48,18 @@ enum Context {
 
 pub struct Deserializer<'de> {
     scanner: Scanner<'de>,
+    /// Scratch buffer for building strings that require escape processing.
+    /// Bare strings that need no processing can borrow directly from input
+    /// (zero-copy path, to be wired up in a future pass).
+    #[allow(dead_code)]
+    scratch: Vec<u8>,
 }
 
 impl<'de> Deserializer<'de> {
     pub fn new(input: &'de str) -> Self {
         Self {
             scanner: Scanner::new(input),
+            scratch: Vec::new(),
         }
     }
 
@@ -99,16 +119,17 @@ impl<'de> Deserializer<'de> {
                 }
                 Some(ch) if ch == '\n' || ch == '\r' => {
                     return Err(Error::Parse(ayml_core::Error::new(
-                        ayml_core::ErrorKind::Expected(
-                            "closing `\"` before line break".into(),
-                        ),
+                        ayml_core::ErrorKind::Expected("closing `\"` before line break".into()),
                         ayml_core::Span::new(start, self.scanner.offset),
                         self.scanner.source(),
                     )));
                 }
                 Some(ch) => {
                     if !Scanner::is_printable(ch) {
-                        return Err(self.scanner.error(ayml_core::ErrorKind::NonPrintable(ch)).into());
+                        return Err(self
+                            .scanner
+                            .error(ayml_core::ErrorKind::NonPrintable(ch))
+                            .into());
                     }
                     self.scanner.advance();
                     value.push(ch);
@@ -135,10 +156,16 @@ impl<'de> Deserializer<'de> {
                 self.scanner.advance();
             }
             Some(ch) => {
-                return Err(self.scanner.error(ayml_core::ErrorKind::UnexpectedChar(ch)).into());
+                return Err(self
+                    .scanner
+                    .error(ayml_core::ErrorKind::UnexpectedChar(ch))
+                    .into());
             }
             None => {
-                return Err(self.scanner.error(ayml_core::ErrorKind::UnexpectedEof).into());
+                return Err(self
+                    .scanner
+                    .error(ayml_core::ErrorKind::UnexpectedEof)
+                    .into());
             }
         }
 
@@ -178,9 +205,10 @@ impl<'de> Deserializer<'de> {
                     return Ok(self.scanner.input[start..ws_start].to_string());
                 }
                 Some(ch) if !Scanner::is_printable(ch) => {
-                    return Err(
-                        self.scanner.error(ayml_core::ErrorKind::NonPrintable(ch)).into()
-                    );
+                    return Err(self
+                        .scanner
+                        .error(ayml_core::ErrorKind::NonPrintable(ch))
+                        .into());
                 }
                 Some(_) => {
                     self.scanner.advance();
@@ -242,7 +270,7 @@ impl<'de> Deserializer<'de> {
     }
 }
 
-impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
+impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     type Error = Error;
 
     fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
@@ -283,7 +311,10 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
                     },
                 }
             }
-            None => Err(self.scanner.error(ayml_core::ErrorKind::UnexpectedEof).into()),
+            None => Err(self
+                .scanner
+                .error(ayml_core::ErrorKind::UnexpectedEof)
+                .into()),
         }
     }
 
@@ -609,7 +640,11 @@ fn try_parse_float(s: &str) -> Option<f64> {
         }
     }
 
-    let full = if negative { format!("-{s}") } else { s.to_string() };
+    let full = if negative {
+        format!("-{s}")
+    } else {
+        s.to_string()
+    };
     full.parse::<f64>().ok()
 }
 
@@ -771,5 +806,26 @@ mod tests {
     fn test_error_type_mismatch() {
         assert!(from_str::<bool>("42").is_err());
         assert!(from_str::<i32>("hello").is_err());
+    }
+
+    #[test]
+    fn test_from_slice() {
+        assert_eq!(from_slice::<i32>(b"42").unwrap(), 42);
+        assert_eq!(from_slice::<String>(b"hello").unwrap(), "hello");
+        assert_eq!(from_slice::<String>(b"\"quoted\"").unwrap(), "quoted");
+    }
+
+    #[test]
+    fn test_from_slice_invalid_utf8() {
+        assert!(from_slice::<String>(&[0xFF, 0xFE]).is_err());
+    }
+
+    #[test]
+    fn test_from_reader() {
+        let data = b"42" as &[u8];
+        assert_eq!(from_reader::<_, i32>(data).unwrap(), 42);
+
+        let data = b"\"hello\"" as &[u8];
+        assert_eq!(from_reader::<_, String>(data).unwrap(), "hello");
     }
 }
