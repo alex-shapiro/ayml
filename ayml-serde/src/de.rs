@@ -49,6 +49,9 @@ enum Context {
 
 pub(crate) struct Deserializer<R> {
     read: R,
+    /// Current parsing context — flow collections set this to Flow so
+    /// bare string scanning stops at `,`, `]`, `}`.
+    ctx: Context,
     /// Scratch buffer for building strings that require escape processing.
     /// Bare strings that need no processing can borrow directly from input
     /// (zero-copy path, to be wired up in a future pass).
@@ -60,6 +63,7 @@ impl<'a> Deserializer<StrRead<'a>> {
     fn from_str(s: &'a str) -> Self {
         Self {
             read: StrRead::new(s),
+            ctx: Context::Block,
             scratch: Vec::new(),
         }
     }
@@ -69,6 +73,7 @@ impl<R: std::io::Read> Deserializer<IoRead<R>> {
     fn from_reader(rdr: R) -> Self {
         Self {
             read: IoRead::new(rdr),
+            ctx: Context::Block,
             scratch: Vec::new(),
         }
     }
@@ -198,6 +203,121 @@ impl<'de, R: Read<'de>> Deserializer<R> {
             }
         }
         Ok(())
+    }
+
+    // ── Block-level helpers ────────────────────────────────────────
+
+    fn eat(&mut self, expected: char) -> Result<bool> {
+        if self.peek()? == Some(expected) {
+            self.advance()?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    fn count_spaces(&mut self) -> Result<usize> {
+        let start_off = self.read.offset();
+        let mut count = 0;
+        loop {
+            self.read.fill_to(start_off + count + 1)?;
+            let input = self.read.input();
+            if start_off + count >= input.len() {
+                break;
+            }
+            match input.as_bytes()[start_off + count] {
+                b' ' => count += 1,
+                b'\t' => {
+                    return Err(
+                        self.error_at("tabs not allowed for indentation", start_off + count)
+                    )
+                }
+                _ => break,
+            }
+        }
+        Ok(count)
+    }
+
+    fn eat_spaces(&mut self, n: usize) -> Result<bool> {
+        if n == 0 {
+            return Ok(true);
+        }
+        let off = self.read.offset();
+        self.read.fill_to(off + n)?;
+        let input = self.read.input();
+        if off + n > input.len() {
+            return Ok(false);
+        }
+        if input.as_bytes()[off..off + n].iter().all(|&b| b == b' ') {
+            self.set_offset(off + n);
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    fn current_indent(&self) -> usize {
+        let input = self.read.input();
+        let offset = self.read.offset();
+        if offset == 0 {
+            return 0;
+        }
+        let bytes = input.as_bytes();
+        for i in (0..offset).rev() {
+            if bytes[i] == b'\n' || bytes[i] == b'\r' {
+                return offset - i - 1;
+            }
+        }
+        offset
+    }
+
+    fn skip_blank_lines(&mut self) -> Result<()> {
+        loop {
+            let saved = self.offset();
+            self.skip_inline_whitespace()?;
+            if let Some('\n' | '\r') = self.peek()? {
+                self.eat_break()?;
+            } else {
+                self.set_offset(saved);
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    fn skip_block_gaps(&mut self) -> Result<()> {
+        loop {
+            let saved = self.offset();
+            self.skip_blank_lines()?;
+            // Skip comment lines
+            let spaces = self.count_spaces()?;
+            let off = self.offset() + spaces;
+            self.read.fill_to(off + 1)?;
+            let input = self.read.input();
+            if off < input.len() && input.as_bytes()[off] == b'#' {
+                self.set_offset(off);
+                self.advance()?; // skip '#'
+                self.rest_of_line()?;
+                self.eat_break()?;
+                continue;
+            }
+            if self.offset() == saved {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    fn is_mapping_value_indicator(&mut self) -> Result<bool> {
+        if self.peek()? != Some(':') {
+            return Ok(false);
+        }
+        let next = self.peek_nth(1)?;
+        Ok(next.is_none()
+            || next == Some(' ')
+            || next == Some('\t')
+            || next == Some('\n')
+            || next == Some('\r'))
     }
 
     // ── Scalar scanning ──────────────────────────────────────────
@@ -357,7 +477,7 @@ impl<'de, R: Read<'de>> Deserializer<R> {
 
     /// Parse a bare string as a bool, or return an error.
     fn parse_bool(&mut self) -> Result<bool> {
-        let text = self.scan_bare_string(Context::Block)?;
+        let text = self.scan_bare_string(self.ctx)?;
         match text.as_str() {
             "true" => Ok(true),
             "false" => Ok(false),
@@ -371,7 +491,7 @@ impl<'de, R: Read<'de>> Deserializer<R> {
         T::Error: std::fmt::Display,
     {
         let start = self.offset();
-        let text = self.scan_bare_string(Context::Block)?;
+        let text = self.scan_bare_string(self.ctx)?;
         let i = try_parse_int(&text).map_err(|()| self.error_at("integer overflow", start))?;
         let i = i.ok_or_else(|| self.error(&format!("expected integer, got `{text}`")))?;
         T::try_from(i).map_err(|e| self.error(&format!("integer out of range: {e}")))
@@ -379,7 +499,7 @@ impl<'de, R: Read<'de>> Deserializer<R> {
 
     /// Parse a bare string as a float in the requested type.
     fn parse_float<V: Visitor<'de>>(&mut self, visitor: V) -> Result<V::Value> {
-        let text = self.scan_bare_string(Context::Block)?;
+        let text = self.scan_bare_string(self.ctx)?;
         if let Some(f) = try_parse_float(&text) {
             // Also accept integer-shaped text as float
             visitor.visit_f64(f)
@@ -398,19 +518,54 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
         self.skip_whitespace_and_comments()?;
         match self.peek()? {
             Some('"') => {
+                let start = self.offset();
                 let s = self.scan_double_quoted()?;
+                // Check if this is a mapping key
+                self.skip_inline_whitespace()?;
+                if self.is_mapping_value_indicator()? {
+                    self.set_offset(start);
+                    let indent = self.current_indent();
+                    return visitor.visit_map(MapAccess::new(self, MapStyle::Block(indent)));
+                }
                 visitor.visit_string(s)
             }
             Some('[') => {
-                todo!("deserialize_any: sequence")
+                self.advance()?;
+                let prev_ctx = self.ctx;
+                let value = visitor.visit_seq(SeqAccess::new(self, SeqStyle::Flow))?;
+                self.skip_whitespace_and_comments()?;
+                if !self.eat(']')? {
+                    return Err(self.error("expected `]` to close sequence"));
+                }
+                self.ctx = prev_ctx;
+                Ok(value)
             }
             Some('{') => {
-                todo!("deserialize_any: mapping")
+                self.advance()?;
+                let prev_ctx = self.ctx;
+                let value = visitor.visit_map(MapAccess::new(self, MapStyle::Flow))?;
+                self.skip_whitespace_and_comments()?;
+                if !self.eat('}')? {
+                    return Err(self.error("expected `}` to close mapping"));
+                }
+                self.ctx = prev_ctx;
+                Ok(value)
+            }
+            Some('-') if self.peek_nth(1)? == Some(' ') => {
+                let indent = self.current_indent();
+                visitor.visit_seq(SeqAccess::new(self, SeqStyle::Block(indent)))
             }
             Some(_) => {
-                // Bare scalar — resolve type
+                // Bare scalar — but check if it's a mapping key first
                 let start = self.offset();
-                let text = self.scan_bare_string(Context::Block)?;
+                let text = self.scan_bare_string(self.ctx)?;
+                self.skip_inline_whitespace()?;
+                if self.is_mapping_value_indicator()? {
+                    self.set_offset(start);
+                    let indent = self.current_indent();
+                    return visitor.visit_map(MapAccess::new(self, MapStyle::Block(indent)));
+                }
+                // Resolve scalar type
                 match text.as_str() {
                     "null" => visitor.visit_unit(),
                     "true" => visitor.visit_bool(true),
@@ -476,7 +631,7 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
         self.skip_whitespace_and_comments()?;
         // i64 can't represent all u64 values, so parse directly
         let start = self.offset();
-        let text = self.scan_bare_string(Context::Block)?;
+        let text = self.scan_bare_string(self.ctx)?;
         let val: u64 = parse_unsigned(&text).ok_or_else(|| {
             self.error_at(&format!("expected unsigned integer, got `{text}`"), start)
         })?;
@@ -495,7 +650,7 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
 
     fn deserialize_char<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         self.skip_whitespace_and_comments()?;
-        let s = self.scan_scalar_string(Context::Block)?;
+        let s = self.scan_scalar_string(self.ctx)?;
         let mut chars = s.chars();
         let ch = chars
             .next()
@@ -508,7 +663,7 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
 
     fn deserialize_str<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         self.skip_whitespace_and_comments()?;
-        let s = self.scan_scalar_string(Context::Block)?;
+        let s = self.scan_scalar_string(self.ctx)?;
         visitor.visit_string(s)
     }
 
@@ -518,7 +673,7 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
 
     fn deserialize_bytes<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         self.skip_whitespace_and_comments()?;
-        let s = self.scan_scalar_string(Context::Block)?;
+        let s = self.scan_scalar_string(self.ctx)?;
         visitor.visit_bytes(s.as_bytes())
     }
 
@@ -554,7 +709,7 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
 
     fn deserialize_unit<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         self.skip_whitespace_and_comments()?;
-        let text = self.scan_bare_string(Context::Block)?;
+        let text = self.scan_bare_string(self.ctx)?;
         if text == "null" {
             visitor.visit_unit()
         } else {
@@ -578,34 +733,69 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
         visitor.visit_newtype_struct(self)
     }
 
-    fn deserialize_seq<V: Visitor<'de>>(self, _visitor: V) -> Result<V::Value> {
-        todo!()
+    fn deserialize_seq<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
+        self.skip_whitespace_and_comments()?;
+        match self.peek()? {
+            Some('[') => {
+                self.advance()?;
+                let prev_ctx = self.ctx;
+                let value = visitor.visit_seq(SeqAccess::new(self, SeqStyle::Flow))?;
+                self.skip_whitespace_and_comments()?;
+                if !self.eat(']')? {
+                    return Err(self.error("expected `]` to close sequence"));
+                }
+                self.ctx = prev_ctx;
+                Ok(value)
+            }
+            Some('-') if self.peek_nth(1)? == Some(' ') => {
+                let indent = self.current_indent();
+                visitor.visit_seq(SeqAccess::new(self, SeqStyle::Block(indent)))
+            }
+            _ => Err(self.error("expected sequence (`[` or `- `)")),
+        }
     }
 
-    fn deserialize_tuple<V: Visitor<'de>>(self, _len: usize, _visitor: V) -> Result<V::Value> {
-        todo!()
+    fn deserialize_tuple<V: Visitor<'de>>(self, _len: usize, visitor: V) -> Result<V::Value> {
+        self.deserialize_seq(visitor)
     }
 
     fn deserialize_tuple_struct<V: Visitor<'de>>(
         self,
         _name: &'static str,
         _len: usize,
-        _visitor: V,
+        visitor: V,
     ) -> Result<V::Value> {
-        todo!()
+        self.deserialize_seq(visitor)
     }
 
-    fn deserialize_map<V: Visitor<'de>>(self, _visitor: V) -> Result<V::Value> {
-        todo!()
+    fn deserialize_map<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
+        self.skip_whitespace_and_comments()?;
+        match self.peek()? {
+            Some('{') => {
+                self.advance()?;
+                let prev_ctx = self.ctx;
+                let value = visitor.visit_map(MapAccess::new(self, MapStyle::Flow))?;
+                self.skip_whitespace_and_comments()?;
+                if !self.eat('}')? {
+                    return Err(self.error("expected `}` to close mapping"));
+                }
+                self.ctx = prev_ctx;
+                Ok(value)
+            }
+            _ => {
+                let indent = self.current_indent();
+                visitor.visit_map(MapAccess::new(self, MapStyle::Block(indent)))
+            }
+        }
     }
 
     fn deserialize_struct<V: Visitor<'de>>(
         self,
         _name: &'static str,
         _fields: &'static [&'static str],
-        _visitor: V,
+        visitor: V,
     ) -> Result<V::Value> {
-        todo!()
+        self.deserialize_map(visitor)
     }
 
     fn deserialize_enum<V: Visitor<'de>>(
@@ -623,6 +813,217 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
 
     fn deserialize_ignored_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         self.deserialize_any(visitor)
+    }
+}
+
+// ── SeqAccess ────────────────────────────────────────────────────
+
+enum SeqStyle {
+    Flow,
+    Block(usize),
+}
+
+struct SeqAccess<'a, R> {
+    de: &'a mut Deserializer<R>,
+    style: SeqStyle,
+    first: bool,
+}
+
+impl<'a, R> SeqAccess<'a, R> {
+    fn new(de: &'a mut Deserializer<R>, style: SeqStyle) -> Self {
+        Self {
+            de,
+            style,
+            first: true,
+        }
+    }
+}
+
+impl<'a, 'de, R: Read<'de>> de::SeqAccess<'de> for SeqAccess<'a, R> {
+    type Error = Error;
+
+    fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>>
+    where
+        T: de::DeserializeSeed<'de>,
+    {
+        match &self.style {
+            SeqStyle::Flow => {
+                self.de.ctx = Context::Flow;
+                self.de.skip_whitespace_and_comments()?;
+                if self.de.peek()? == Some(']') {
+                    return Ok(None);
+                }
+                if !self.first {
+                    if !self.de.eat(',')? {
+                        return Err(self.de.error("expected `,` or `]`"));
+                    }
+                    self.de.skip_whitespace_and_comments()?;
+                    if self.de.peek()? == Some(']') {
+                        return Ok(None); // trailing comma
+                    }
+                }
+                self.first = false;
+                seed.deserialize(&mut *self.de).map(Some)
+            }
+            SeqStyle::Block(indent) => {
+                let indent = *indent;
+                if self.first {
+                    self.first = false;
+                    // Indent already consumed by deserialize_seq; consume `- `
+                    if !self.de.eat('-')? || self.de.peek()? != Some(' ') {
+                        return Err(self.de.error("expected `- `"));
+                    }
+                    self.de.advance()?; // eat space
+                    return seed.deserialize(&mut *self.de).map(Some);
+                }
+
+                // Between entries: finish current line, move to next
+                if !self.de.is_break_or_eof()? {
+                    self.de.skip_inline_whitespace()?;
+                    if self.de.peek()? == Some('#') {
+                        self.de.rest_of_line()?;
+                    }
+                }
+                if !self.de.is_eof()? {
+                    self.de.eat_break()?;
+                }
+                self.de.skip_block_gaps()?;
+
+                if self.de.is_eof()? {
+                    return Ok(None);
+                }
+
+                let spaces = self.de.count_spaces()?;
+                if spaces != indent {
+                    return Ok(None);
+                }
+                if !self.de.eat_spaces(indent)? {
+                    return Ok(None);
+                }
+                // Check for `- `
+                if self.de.peek()? != Some('-') || self.de.peek_nth(1)? != Some(' ') {
+                    // Not a sequence entry — rewind indent
+                    self.de.set_offset(self.de.offset() - indent);
+                    return Ok(None);
+                }
+                self.de.advance()?; // eat '-'
+                self.de.advance()?; // eat ' '
+                seed.deserialize(&mut *self.de).map(Some)
+            }
+        }
+    }
+}
+
+// ── MapAccess ────────────────────────────────────────────────────
+
+enum MapStyle {
+    Flow,
+    Block(usize),
+}
+
+struct MapAccess<'a, R> {
+    de: &'a mut Deserializer<R>,
+    style: MapStyle,
+    first: bool,
+}
+
+impl<'a, R> MapAccess<'a, R> {
+    fn new(de: &'a mut Deserializer<R>, style: MapStyle) -> Self {
+        Self {
+            de,
+            style,
+            first: true,
+        }
+    }
+}
+
+impl<'a, 'de, R: Read<'de>> de::MapAccess<'de> for MapAccess<'a, R> {
+    type Error = Error;
+
+    fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>
+    where
+        K: de::DeserializeSeed<'de>,
+    {
+        match &self.style {
+            MapStyle::Flow => {
+                self.de.ctx = Context::Flow;
+                self.de.skip_whitespace_and_comments()?;
+                if self.de.peek()? == Some('}') {
+                    return Ok(None);
+                }
+                if !self.first {
+                    if !self.de.eat(',')? {
+                        return Err(self.de.error("expected `,` or `}`"));
+                    }
+                    self.de.skip_whitespace_and_comments()?;
+                    if self.de.peek()? == Some('}') {
+                        return Ok(None); // trailing comma
+                    }
+                }
+                self.first = false;
+                let key = seed.deserialize(&mut *self.de)?;
+                self.de.skip_whitespace_and_comments()?;
+                if !self.de.eat(':')? {
+                    return Err(self.de.error("expected `:` after mapping key"));
+                }
+                self.de.skip_whitespace_and_comments()?;
+                Ok(Some(key))
+            }
+            MapStyle::Block(indent) => {
+                let indent = *indent;
+                if self.first {
+                    self.first = false;
+                    // Indent already consumed by deserialize_map/struct
+                } else {
+                    // Between entries: finish current line, move to next
+                    if !self.de.is_break_or_eof()? {
+                        self.de.skip_inline_whitespace()?;
+                        if self.de.peek()? == Some('#') {
+                            self.de.rest_of_line()?;
+                        }
+                    }
+                    if !self.de.is_eof()? {
+                        self.de.eat_break()?;
+                    }
+                    self.de.skip_block_gaps()?;
+
+                    if self.de.is_eof()? {
+                        return Ok(None);
+                    }
+
+                    let spaces = self.de.count_spaces()?;
+                    if spaces != indent {
+                        return Ok(None);
+                    }
+                    self.de.eat_spaces(indent)?;
+                }
+
+                // Check for sequence indicator (not a mapping entry)
+                if self.de.peek()? == Some('-') && self.de.peek_nth(1)? == Some(' ') {
+                    // Rewind indent
+                    self.de.set_offset(self.de.offset() - indent);
+                    return Ok(None);
+                }
+
+                let key = seed.deserialize(&mut *self.de)?;
+                self.de.skip_inline_whitespace()?;
+                if !self.de.eat(':')? {
+                    return Err(self.de.error("expected `:` after mapping key"));
+                }
+                // Skip inline whitespace after colon (value follows)
+                self.de.skip_inline_whitespace()?;
+                Ok(Some(key))
+            }
+        }
+    }
+
+    fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value>
+    where
+        V: de::DeserializeSeed<'de>,
+    {
+        // For flow mappings, ctx is already set to Flow by next_key_seed.
+        // It will be restored to prev_ctx when next_key_seed detects `}`.
+        seed.deserialize(&mut *self.de)
     }
 }
 
@@ -923,6 +1324,198 @@ mod tests {
         assert_eq!(
             from_str::<AnyScalar>("hello").unwrap(),
             AnyScalar::Str("hello".to_string())
+        );
+    }
+
+    // ── Collection tests ──────────────────────────────────────────
+
+    #[test]
+    fn test_flow_sequence() {
+        let v: Vec<i32> = from_str("[1, 2, 3]").unwrap();
+        assert_eq!(v, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn test_flow_sequence_trailing_comma() {
+        let v: Vec<i32> = from_str("[1, 2,]").unwrap();
+        assert_eq!(v, vec![1, 2]);
+    }
+
+    #[test]
+    fn test_flow_sequence_empty() {
+        let v: Vec<i32> = from_str("[]").unwrap();
+        assert_eq!(v, Vec::<i32>::new());
+    }
+
+    #[test]
+    fn test_flow_sequence_strings() {
+        let v: Vec<String> = from_str(r#"["hello", "world"]"#).unwrap();
+        assert_eq!(v, vec!["hello", "world"]);
+    }
+
+    #[test]
+    fn test_flow_mapping() {
+        use std::collections::HashMap;
+        let m: HashMap<String, i32> = from_str("{a: 1, b: 2}").unwrap();
+        assert_eq!(m["a"], 1);
+        assert_eq!(m["b"], 2);
+    }
+
+    #[test]
+    fn test_flow_mapping_trailing_comma() {
+        use std::collections::HashMap;
+        let m: HashMap<String, i32> = from_str("{a: 1,}").unwrap();
+        assert_eq!(m["a"], 1);
+    }
+
+    #[test]
+    fn test_flow_mapping_empty() {
+        use std::collections::HashMap;
+        let m: HashMap<String, i32> = from_str("{}").unwrap();
+        assert!(m.is_empty());
+    }
+
+    #[test]
+    fn test_block_sequence() {
+        let v: Vec<String> = from_str("- apple\n- banana\n- cherry").unwrap();
+        assert_eq!(v, vec!["apple", "banana", "cherry"]);
+    }
+
+    #[test]
+    fn test_block_sequence_integers() {
+        let v: Vec<i32> = from_str("- 1\n- 2\n- 3").unwrap();
+        assert_eq!(v, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn test_block_mapping_struct() {
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        struct Person {
+            name: String,
+            age: u32,
+        }
+        let p: Person = from_str("name: John\nage: 30").unwrap();
+        assert_eq!(
+            p,
+            Person {
+                name: "John".to_string(),
+                age: 30
+            }
+        );
+    }
+
+    #[test]
+    fn test_block_mapping_with_comments() {
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        struct Config {
+            host: String,
+            port: u16,
+        }
+        let c: Config = from_str("host: localhost # the host\nport: 8080").unwrap();
+        assert_eq!(
+            c,
+            Config {
+                host: "localhost".to_string(),
+                port: 8080
+            }
+        );
+    }
+
+    #[test]
+    fn test_nested_struct() {
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        struct Outer {
+            inner: Inner,
+        }
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        struct Inner {
+            value: i32,
+        }
+        let o: Outer = from_str("inner:\n  value: 42").unwrap();
+        assert_eq!(
+            o,
+            Outer {
+                inner: Inner { value: 42 }
+            }
+        );
+    }
+
+    #[test]
+    fn test_struct_with_sequence() {
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        struct Config {
+            items: Vec<String>,
+        }
+        let c: Config = from_str("items:\n- alpha\n- beta").unwrap();
+        assert_eq!(
+            c,
+            Config {
+                items: vec!["alpha".to_string(), "beta".to_string()]
+            }
+        );
+    }
+
+    #[test]
+    fn test_sequence_of_structs() {
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        struct Item {
+            name: String,
+            qty: u32,
+        }
+        let items: Vec<Item> = from_str("- name: Widget\n  qty: 5\n- name: Gadget\n  qty: 3").unwrap();
+        assert_eq!(
+            items,
+            vec![
+                Item { name: "Widget".to_string(), qty: 5 },
+                Item { name: "Gadget".to_string(), qty: 3 },
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tuple() {
+        let t: (i32, String, bool) = from_str("[42, hello, true]").unwrap();
+        assert_eq!(t, (42, "hello".to_string(), true));
+    }
+
+    #[test]
+    fn test_flow_nested() {
+        let v: Vec<Vec<i32>> = from_str("[[1, 2], [3, 4]]").unwrap();
+        assert_eq!(v, vec![vec![1, 2], vec![3, 4]]);
+    }
+
+    #[test]
+    fn test_block_sequence_with_flow() {
+        let v: Vec<Vec<i32>> = from_str("- [1, 2]\n- [3, 4]").unwrap();
+        assert_eq!(v, vec![vec![1, 2], vec![3, 4]]);
+    }
+
+    #[test]
+    fn test_struct_with_flow_mapping() {
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        struct Config {
+            tags: std::collections::HashMap<String, String>,
+        }
+        let c: Config = from_str("tags: {env: prod, region: us}").unwrap();
+        assert_eq!(c.tags["env"], "prod");
+        assert_eq!(c.tags["region"], "us");
+    }
+
+    #[test]
+    fn test_from_reader_struct() {
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        struct Config {
+            name: String,
+            port: u16,
+        }
+        let data = b"name: myapp\nport: 3000" as &[u8];
+        let c: Config = from_reader(data).unwrap();
+        assert_eq!(
+            c,
+            Config {
+                name: "myapp".to_string(),
+                port: 3000
+            }
         );
     }
 
