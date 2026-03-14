@@ -1107,7 +1107,8 @@ A block mapping is a series of key/value pairs.
 A mapping MUST NOT have duplicate keys (this is a semantic constraint enforced
 by the parser, not expressible in the grammar).
 
-A mapping key is any non-null scalar:
+A mapping key is a bool, integer, or string scalar. Float and null keys are
+not allowed.
 
 ```
 ns-mapping-key(c) ::=
@@ -1115,12 +1116,11 @@ ns-mapping-key(c) ::=
   | c-triple-quoted
   | ns-bool
   | ns-integer
-  | ns-float
   | ns-bare-string(c)
 ```
 
-A mapping key MUST NOT resolve to null. To use the string `"null"` as a key,
-quote it.
+A mapping key MUST NOT resolve to null or float. To use the string `"null"` as
+a key, quote it.
 
 A mapping entry. The value may appear on the same line or on subsequent
 lines. When the value is on subsequent lines, the indentation level `m` is

@@ -1,0 +1,14 @@
+# a library
+- name: a
+  version: 1.0
+# b library
+- name: b
+  version: 2.0
+# c library
+- name: c
+  version: 3.0
+  rules: # what are these rules doing?
+  - 1: 4 # this one is doing 4
+  - 2: 5 # this one is doing 5
+  - 3: 6 # this one is doing 6
+  date: 2026-0-3-10

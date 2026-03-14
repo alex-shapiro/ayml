@@ -1,5 +1,7 @@
 # AYML
 
+> Status: Not Ready For Production Use
+
 Simplified YAML variant built for [Ash](https://ashell.dev)
 
 AYML is a software configuration language that looks like YAML and acts like JSON.
