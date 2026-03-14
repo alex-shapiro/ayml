@@ -46,9 +46,10 @@ fn backslash_eof_in_triple_quoted_is_error() {
     let input = "s: \"\"\"\n  hello\\";
     let err = parse(input).unwrap_err();
     // Should error (unclosed triple-quote), not silently emit a backslash
-    assert!(
-        matches!(err.kind, ErrorKind::UnexpectedEof | ErrorKind::Expected(_)),
-    );
+    assert!(matches!(
+        err.kind,
+        ErrorKind::UnexpectedEof | ErrorKind::Expected(_)
+    ),);
 }
 
 #[test]

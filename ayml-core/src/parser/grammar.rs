@@ -243,11 +243,10 @@ impl<'a> Parser<'a> {
             }
             self.scanner.offset = saved;
 
-            // Try comment line — tab here means "not a comment", stop.
-            let spaces = match self.scanner.count_spaces() {
-                Ok(s) => s,
-                Err(_) => break,
+            let Ok(spaces) = self.scanner.count_spaces() else {
+                break;
             };
+
             if spaces <= n && self.scanner.peek_nth(spaces) == Some('#') {
                 self.scanner.eat_spaces(spaces);
                 self.scanner.advance(); // `#`
@@ -560,9 +559,7 @@ impl<'a> Parser<'a> {
             match Self::try_parse_int(&text) {
                 Ok(Some(i)) => Value::Int(i),
                 Err(()) => {
-                    return Err(self
-                        .scanner
-                        .error_at(ErrorKind::IntegerOverflow, start));
+                    return Err(self.scanner.error_at(ErrorKind::IntegerOverflow, start));
                 }
                 Ok(None) => {
                     if let Some(f) = Self::try_parse_float(&text) {
@@ -717,7 +714,11 @@ impl<'a> Parser<'a> {
             }
         };
 
-        let signed = if negative { -i128::from(abs) } else { i128::from(abs) };
+        let signed = if negative {
+            -i128::from(abs)
+        } else {
+            i128::from(abs)
+        };
         i64::try_from(signed).map(Some).map_err(|_| ())
     }
 
@@ -1233,9 +1234,7 @@ impl<'a> Parser<'a> {
                 } else {
                     match Self::try_parse_int(&text) {
                         Ok(Some(i)) => Ok(Some(RawMapKey::Valid(MapKey::Int(i)))),
-                        Err(()) => Err(self
-                            .scanner
-                            .error_at(ErrorKind::IntegerOverflow, saved)),
+                        Err(()) => Err(self.scanner.error_at(ErrorKind::IntegerOverflow, saved)),
                         Ok(None) => {
                             if Self::try_parse_float(&text).is_some() {
                                 Ok(Some(RawMapKey::Float(saved)))
