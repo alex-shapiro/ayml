@@ -315,3 +315,50 @@ fn quoted_null_key() {
         Value::Str("a value".into())
     );
 }
+
+// ── CRLF and CR line endings ─────────────────────────────────────
+
+#[test]
+fn crlf_line_endings_in_mapping() {
+    let input = "a: 1\r\nb: 2\r\nc: 3";
+    let node = parse(input).unwrap();
+    let map = node.value.as_mapping().unwrap();
+    assert_eq!(map[&MapKey::String("a".into())].value, Value::Int(1));
+    assert_eq!(map[&MapKey::String("b".into())].value, Value::Int(2));
+    assert_eq!(map[&MapKey::String("c".into())].value, Value::Int(3));
+}
+
+#[test]
+fn cr_line_endings_in_mapping() {
+    let input = "a: 1\rb: 2\rc: 3";
+    let node = parse(input).unwrap();
+    let map = node.value.as_mapping().unwrap();
+    assert_eq!(map[&MapKey::String("a".into())].value, Value::Int(1));
+    assert_eq!(map[&MapKey::String("b".into())].value, Value::Int(2));
+    assert_eq!(map[&MapKey::String("c".into())].value, Value::Int(3));
+}
+
+#[test]
+fn crlf_line_endings_in_sequence() {
+    let input = "- one\r\n- two\r\n- three";
+    let node = parse(input).unwrap();
+    let seq = node.value.as_sequence().unwrap();
+    assert_eq!(seq[0].value, Value::Str("one".into()));
+    assert_eq!(seq[1].value, Value::Str("two".into()));
+    assert_eq!(seq[2].value, Value::Str("three".into()));
+}
+
+#[test]
+fn crlf_in_nested_mapping() {
+    let input = "outer:\r\n  inner: val";
+    let node = parse(input).unwrap();
+    let map = node.value.as_mapping().unwrap();
+    let inner = map[&MapKey::String("outer".into())]
+        .value
+        .as_mapping()
+        .unwrap();
+    assert_eq!(
+        inner[&MapKey::String("inner".into())].value,
+        Value::Str("val".into())
+    );
+}

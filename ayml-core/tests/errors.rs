@@ -179,3 +179,52 @@ fn tab_after_spaces_in_indent() {
     let err = parse(input).unwrap_err();
     assert!(matches!(err.kind, ErrorKind::TabIndent));
 }
+
+// ── Non-printable character rejection ────────────────────────────
+
+#[test]
+fn null_byte_in_bare_string_rejected() {
+    let input = "key: hel\x00lo";
+    let err = parse(input).unwrap_err();
+    assert!(matches!(err.kind, ErrorKind::NonPrintable('\x00')));
+}
+
+#[test]
+fn form_feed_in_bare_string_rejected() {
+    let input = "key: hel\x0Clo";
+    let err = parse(input).unwrap_err();
+    assert!(matches!(err.kind, ErrorKind::NonPrintable('\x0C')));
+}
+
+#[test]
+fn bel_in_bare_string_rejected() {
+    let input = "key: hel\x07lo";
+    let err = parse(input).unwrap_err();
+    assert!(matches!(err.kind, ErrorKind::NonPrintable('\x07')));
+}
+
+// ── Deeply nested block sequences ────────────────────────────────
+
+#[test]
+fn deeply_nested_block_sequences_rejected() {
+    // Nested via seq-in-mapping-in-seq pattern:
+    // - s:
+    //   - s:
+    //     - s:
+    //       ...
+    let mut input = String::new();
+    for i in 0..200 {
+        let indent = i * 2;
+        for _ in 0..indent {
+            input.push(' ');
+        }
+        input.push_str("- s:\n");
+    }
+    let indent = 200 * 2;
+    for _ in 0..indent {
+        input.push(' ');
+    }
+    input.push_str("- 1");
+    let err = parse(&input).unwrap_err();
+    assert!(matches!(err.kind, ErrorKind::RecursionLimit));
+}
