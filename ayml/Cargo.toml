@@ -5,5 +5,3 @@ edition = "2024"
 
 [dependencies]
 ayml-core = { path = "../ayml-core" }
-ayml-serde = { path = "../ayml-serde" }
-serde = { version = "1", features = ["derive"] }

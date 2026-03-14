@@ -19,8 +19,6 @@ name = "ayml"
 version = "0.1.0"
 dependencies = [
  "ayml-core",
- "ayml-serde",
- "serde",
 ]
 
 [[package]]
@@ -43,7 +41,6 @@ name = "ayml-serde"
 version = "0.1.0"
 dependencies = [
  "ayml-core",
- "indexmap",
  "serde",
 ]
 

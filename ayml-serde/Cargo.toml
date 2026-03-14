@@ -5,5 +5,4 @@ edition = "2024"
 
 [dependencies]
 ayml-core = { path = "../ayml-core" }
-indexmap = "2.13.0"
 serde = { version = "1", features = ["derive"] }

@@ -1,5 +1,2 @@
-mod de;
-mod ser;
-
-pub use de::from_str;
-pub use ser::to_string;
+// TODO: implement streaming serde Deserializer/Serializer
+// that operates directly on AYML bytes.
