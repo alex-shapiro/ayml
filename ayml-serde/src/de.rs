@@ -1,14 +1,14 @@
-use ayml_core::Scanner;
 use serde::de::{self, DeserializeOwned, Visitor};
 
 use crate::error::{Error, Result};
+use crate::read::{IoRead, Read, StrRead};
 
 /// Deserialize a `T` from a string of AYML text.
 ///
 /// The bound `T: Deserialize<'a>` (rather than `DeserializeOwned`) allows
 /// zero-copy deserialization of borrowed types like `&'a str`.
 pub fn from_str<'a, T: serde::Deserialize<'a>>(s: &'a str) -> Result<T> {
-    let mut de = Deserializer::new(s);
+    let mut de = Deserializer::from_str(s);
     let value = T::deserialize(&mut de)?;
     de.end()?;
     Ok(value)
@@ -26,13 +26,14 @@ pub fn from_slice<'a, T: serde::Deserialize<'a>>(bytes: &'a [u8]) -> Result<T> {
 
 /// Deserialize a `T` from an AYML reader.
 ///
-/// Reads the entire input into memory (AYML's indentation-sensitive grammar
-/// requires random access). The deserialized value cannot borrow from the
-/// input; use [`from_str`] or [`from_slice`] for zero-copy deserialization.
-pub fn from_reader<R: std::io::Read, T: DeserializeOwned>(mut rdr: R) -> Result<T> {
-    let mut buf = String::new();
-    rdr.read_to_string(&mut buf)?;
-    from_str(&buf)
+/// Data is read lazily from the reader as the deserializer advances.
+/// The deserialized value cannot borrow from the input; use [`from_str`]
+/// or [`from_slice`] for zero-copy deserialization.
+pub fn from_reader<R: std::io::Read, T: DeserializeOwned>(rdr: R) -> Result<T> {
+    let mut de = Deserializer::from_reader(rdr);
+    let value = T::deserialize(&mut de)?;
+    de.end()?;
+    Ok(value)
 }
 
 // ── Parsing context ──────────────────────────────────────────────
@@ -46,8 +47,8 @@ enum Context {
 
 // ── Deserializer ─────────────────────────────────────────────────
 
-pub struct Deserializer<'de> {
-    scanner: Scanner<'de>,
+pub(crate) struct Deserializer<R> {
+    read: R,
     /// Scratch buffer for building strings that require escape processing.
     /// Bare strings that need no processing can borrow directly from input
     /// (zero-copy path, to be wired up in a future pass).
@@ -55,139 +56,268 @@ pub struct Deserializer<'de> {
     scratch: Vec<u8>,
 }
 
-impl<'de> Deserializer<'de> {
-    pub fn new(input: &'de str) -> Self {
+impl<'a> Deserializer<StrRead<'a>> {
+    fn from_str(s: &'a str) -> Self {
         Self {
-            scanner: Scanner::new(input),
+            read: StrRead::new(s),
             scratch: Vec::new(),
         }
     }
+}
+
+impl<R: std::io::Read> Deserializer<IoRead<R>> {
+    fn from_reader(rdr: R) -> Self {
+        Self {
+            read: IoRead::new(rdr),
+            scratch: Vec::new(),
+        }
+    }
+}
+
+// ── Character-level helpers ──────────────────────────────────────
+
+impl<'de, R: Read<'de>> Deserializer<R> {
+    fn peek(&mut self) -> Result<Option<char>> {
+        let off = self.read.offset();
+        self.read.fill_to(off + 4)?;
+        let input = self.read.input();
+        if off >= input.len() {
+            Ok(None)
+        } else {
+            Ok(input[off..].chars().next())
+        }
+    }
+
+    fn peek_nth(&mut self, n: usize) -> Result<Option<char>> {
+        let off = self.read.offset();
+        self.read.fill_to(off + (n + 1) * 4)?;
+        let input = self.read.input();
+        if off >= input.len() {
+            Ok(None)
+        } else {
+            Ok(input[off..].chars().nth(n))
+        }
+    }
+
+    fn advance(&mut self) -> Result<Option<char>> {
+        let ch = self.peek()?;
+        if let Some(c) = ch {
+            let off = self.read.offset();
+            self.read.set_offset(off + c.len_utf8());
+        }
+        Ok(ch)
+    }
+
+    fn is_eof(&mut self) -> Result<bool> {
+        Ok(self.peek()?.is_none())
+    }
+
+    fn is_break_or_eof(&mut self) -> Result<bool> {
+        match self.peek()? {
+            None | Some('\n' | '\r') => Ok(true),
+            _ => Ok(false),
+        }
+    }
+
+    fn skip_inline_whitespace(&mut self) -> Result<()> {
+        while let Some(' ' | '\t') = self.peek()? {
+            self.advance()?;
+        }
+        Ok(())
+    }
+
+    fn rest_of_line(&mut self) -> Result<()> {
+        loop {
+            match self.peek()? {
+                Some('\n' | '\r') | None => break,
+                Some(_) => {
+                    self.advance()?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn eat_break(&mut self) -> Result<bool> {
+        match self.peek()? {
+            Some('\r') => {
+                self.advance()?;
+                if self.peek()? == Some('\n') {
+                    self.advance()?;
+                }
+                Ok(true)
+            }
+            Some('\n') => {
+                self.advance()?;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    fn offset(&self) -> usize {
+        self.read.offset()
+    }
+
+    fn set_offset(&mut self, offset: usize) {
+        self.read.set_offset(offset);
+    }
+
+    // ── Error helpers ────────────────────────────────────────────
+
+    fn error(&self, msg: &str) -> Error {
+        let (line, col) = line_col(self.read.input(), self.read.offset());
+        Error::Message(format!("{line}:{col}: {msg}"))
+    }
+
+    fn error_at(&self, msg: &str, offset: usize) -> Error {
+        let (line, col) = line_col(self.read.input(), offset);
+        Error::Message(format!("{line}:{col}: {msg}"))
+    }
 
     fn end(&mut self) -> Result<()> {
-        self.skip_whitespace_and_comments();
-        if self.scanner.is_eof() {
+        self.skip_whitespace_and_comments()?;
+        if self.is_eof()? {
             Ok(())
         } else {
             Err(self.error("trailing characters after value"))
         }
     }
 
-    fn error(&self, msg: &str) -> Error {
-        Error::Message(format!(
-            "{}:{}: {}",
-            line_col(self.scanner.input, self.scanner.offset).0,
-            line_col(self.scanner.input, self.scanner.offset).1,
-            msg
-        ))
-    }
-
-    fn skip_whitespace_and_comments(&mut self) {
+    fn skip_whitespace_and_comments(&mut self) -> Result<()> {
         loop {
-            // Skip spaces, tabs, and line breaks
-            match self.scanner.peek() {
+            match self.peek()? {
                 Some(' ' | '\t' | '\n' | '\r') => {
-                    self.scanner.advance();
+                    self.advance()?;
                 }
                 Some('#') => {
-                    // Comment — skip to end of line
-                    self.scanner.rest_of_line();
-                    self.scanner.eat_break();
+                    self.rest_of_line()?;
+                    self.eat_break()?;
                 }
                 _ => break,
             }
         }
+        Ok(())
     }
 
     // ── Scalar scanning ──────────────────────────────────────────
 
     /// Scan a double-quoted string, returning the decoded content.
     fn scan_double_quoted(&mut self) -> Result<String> {
-        let start = self.scanner.offset;
-        self.scanner.advance(); // opening `"`
+        let start = self.offset();
+        self.advance()?; // opening `"`
         let mut value = String::new();
 
         loop {
-            match self.scanner.peek() {
+            match self.peek()? {
                 Some('"') => {
-                    self.scanner.advance();
+                    self.advance()?;
                     return Ok(value);
                 }
                 Some('\\') => {
-                    self.scanner.advance();
-                    let ch = self.scanner.parse_escape().map_err(Error::from)?;
+                    self.advance()?;
+                    let ch = self.parse_escape()?;
                     value.push(ch);
                 }
                 Some(ch) if ch == '\n' || ch == '\r' => {
-                    return Err(Error::Parse(ayml_core::Error::new(
-                        ayml_core::ErrorKind::Expected("closing `\"` before line break".into()),
-                        ayml_core::Span::new(start, self.scanner.offset),
-                        self.scanner.source(),
-                    )));
+                    return Err(self.error_at("expected closing `\"` before line break", start));
                 }
                 Some(ch) => {
-                    if !Scanner::is_printable(ch) {
-                        return Err(self
-                            .scanner
-                            .error(ayml_core::ErrorKind::NonPrintable(ch))
-                            .into());
+                    if !is_printable(ch) {
+                        return Err(
+                            self.error(&format!("non-printable character U+{:04X}", ch as u32))
+                        );
                     }
-                    self.scanner.advance();
+                    self.advance()?;
                     value.push(ch);
                 }
                 None => {
-                    return Err(Error::Parse(ayml_core::Error::new(
-                        ayml_core::ErrorKind::UnexpectedEof,
-                        ayml_core::Span::new(start, self.scanner.offset),
-                        self.scanner.source(),
-                    )));
+                    return Err(self.error_at("unexpected end of input in string", start));
                 }
             }
         }
     }
 
+    /// Parse a double-quoted escape sequence (after consuming the `\`).
+    fn parse_escape(&mut self) -> Result<char> {
+        let esc_start = self.offset().saturating_sub(1);
+        match self.advance()? {
+            Some('0') => Ok('\0'),
+            Some('a') => Ok('\x07'),
+            Some('b') => Ok('\x08'),
+            Some('t') => Ok('\t'),
+            Some('n') => Ok('\n'),
+            Some('v') => Ok('\x0B'),
+            Some('f') => Ok('\x0C'),
+            Some('r') => Ok('\r'),
+            Some('e') => Ok('\x1B'),
+            Some(' ') => Ok(' '),
+            Some('"') => Ok('"'),
+            Some('/') => Ok('/'),
+            Some('\\') => Ok('\\'),
+            Some('x') => self.parse_hex_escape(2),
+            Some('u') => self.parse_hex_escape(4),
+            Some('U') => self.parse_hex_escape(8),
+            Some(ch) => Err(self.error_at(&format!("invalid escape: \\{ch}"), esc_start)),
+            None => Err(self.error_at("unexpected end of input in escape", esc_start)),
+        }
+    }
+
+    fn parse_hex_escape(&mut self, digits: usize) -> Result<char> {
+        let start = self.offset();
+        let mut value: u32 = 0;
+        for _ in 0..digits {
+            match self.advance()? {
+                Some(ch) if ch.is_ascii_hexdigit() => {
+                    value = value * 16 + ch.to_digit(16).unwrap();
+                }
+                _ => {
+                    return Err(self.error_at(&format!("expected {digits} hex digits"), start));
+                }
+            }
+        }
+        char::from_u32(value).ok_or_else(|| {
+            self.error_at(&format!("invalid unicode code point U+{value:04X}"), start)
+        })
+    }
+
     /// Scan a bare (unquoted) scalar string in the given context.
     /// Returns the raw text without type resolution.
     fn scan_bare_string(&mut self, ctx: Context) -> Result<String> {
-        let start = self.scanner.offset;
+        let start = self.offset();
 
         // ns-plain-first-char
-        match self.scanner.peek() {
+        match self.peek()? {
             Some(ch) if is_plain_first(ch) => {
-                self.scanner.advance();
+                self.advance()?;
             }
             Some(ch) => {
-                return Err(self
-                    .scanner
-                    .error(ayml_core::ErrorKind::UnexpectedChar(ch))
-                    .into());
+                return Err(self.error(&format!("unexpected character `{ch}`")));
             }
             None => {
-                return Err(self
-                    .scanner
-                    .error(ayml_core::ErrorKind::UnexpectedEof)
-                    .into());
+                return Err(self.error("unexpected end of input"));
             }
         }
 
         loop {
-            let ws_start = self.scanner.offset;
-            self.scanner.skip_inline_whitespace();
-            let ws_end = self.scanner.offset;
+            let ws_start = self.offset();
+            self.skip_inline_whitespace()?;
+            let ws_end = self.offset();
 
-            if self.scanner.is_break_or_eof() {
-                return Ok(self.scanner.input[start..ws_start].to_string());
+            if self.is_break_or_eof()? {
+                return Ok(self.read.input()[start..ws_start].to_string());
             }
 
-            match self.scanner.peek() {
+            match self.peek()? {
                 Some('#') if ws_end > ws_start => {
-                    self.scanner.offset = ws_start;
-                    return Ok(self.scanner.input[start..ws_start].to_string());
+                    self.set_offset(ws_start);
+                    return Ok(self.read.input()[start..ws_start].to_string());
                 }
                 Some('#') => {
-                    self.scanner.advance();
+                    self.advance()?;
                 }
                 Some(':') => {
-                    let next = self.scanner.peek_nth(1);
+                    let next = self.peek_nth(1)?;
                     if next.is_none()
                         || next == Some(' ')
                         || next == Some('\t')
@@ -195,26 +325,23 @@ impl<'de> Deserializer<'de> {
                         || next == Some('\r')
                     {
                         if ws_end > ws_start {
-                            self.scanner.offset = ws_start;
+                            self.set_offset(ws_start);
                         }
-                        return Ok(self.scanner.input[start..ws_start].to_string());
+                        return Ok(self.read.input()[start..ws_start].to_string());
                     }
-                    self.scanner.advance();
+                    self.advance()?;
                 }
                 Some(',' | ']' | '}') if ctx == Context::Flow => {
-                    return Ok(self.scanner.input[start..ws_start].to_string());
+                    return Ok(self.read.input()[start..ws_start].to_string());
                 }
-                Some(ch) if !Scanner::is_printable(ch) => {
-                    return Err(self
-                        .scanner
-                        .error(ayml_core::ErrorKind::NonPrintable(ch))
-                        .into());
+                Some(ch) if !is_printable(ch) => {
+                    return Err(self.error(&format!("non-printable character U+{:04X}", ch as u32)));
                 }
                 Some(_) => {
-                    self.scanner.advance();
+                    self.advance()?;
                 }
                 None => {
-                    return Ok(self.scanner.input[start..ws_start].to_string());
+                    return Ok(self.read.input()[start..ws_start].to_string());
                 }
             }
         }
@@ -222,7 +349,7 @@ impl<'de> Deserializer<'de> {
 
     /// Scan the next scalar value as a string (quoted or bare).
     fn scan_scalar_string(&mut self, ctx: Context) -> Result<String> {
-        match self.scanner.peek() {
+        match self.peek()? {
             Some('"') => self.scan_double_quoted(),
             _ => self.scan_bare_string(ctx),
         }
@@ -243,15 +370,9 @@ impl<'de> Deserializer<'de> {
     where
         T::Error: std::fmt::Display,
     {
-        let start = self.scanner.offset;
+        let start = self.offset();
         let text = self.scan_bare_string(Context::Block)?;
-        let i = try_parse_int(&text).map_err(|()| {
-            Error::Message(format!(
-                "{}:{}: integer overflow",
-                line_col(self.scanner.input, start).0,
-                line_col(self.scanner.input, start).1,
-            ))
-        })?;
+        let i = try_parse_int(&text).map_err(|()| self.error_at("integer overflow", start))?;
         let i = i.ok_or_else(|| self.error(&format!("expected integer, got `{text}`")))?;
         T::try_from(i).map_err(|e| self.error(&format!("integer out of range: {e}")))
     }
@@ -270,12 +391,12 @@ impl<'de> Deserializer<'de> {
     }
 }
 
-impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
+impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
     type Error = Error;
 
     fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        self.skip_whitespace_and_comments();
-        match self.scanner.peek() {
+        self.skip_whitespace_and_comments()?;
+        match self.peek()? {
             Some('"') => {
                 let s = self.scan_double_quoted()?;
                 visitor.visit_string(s)
@@ -288,7 +409,7 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
             }
             Some(_) => {
                 // Bare scalar — resolve type
-                let start = self.scanner.offset;
+                let start = self.offset();
                 let text = self.scan_bare_string(Context::Block)?;
                 match text.as_str() {
                     "null" => visitor.visit_unit(),
@@ -296,11 +417,7 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
                     "false" => visitor.visit_bool(false),
                     _ => match try_parse_int(&text) {
                         Ok(Some(i)) => visitor.visit_i64(i),
-                        Err(()) => Err(Error::Message(format!(
-                            "{}:{}: integer overflow",
-                            line_col(self.scanner.input, start).0,
-                            line_col(self.scanner.input, start).1,
-                        ))),
+                        Err(()) => Err(self.error_at("integer overflow", start)),
                         Ok(None) => {
                             if let Some(f) = try_parse_float(&text) {
                                 visitor.visit_f64(f)
@@ -311,80 +428,73 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
                     },
                 }
             }
-            None => Err(self
-                .scanner
-                .error(ayml_core::ErrorKind::UnexpectedEof)
-                .into()),
+            None => Err(self.error("unexpected end of input")),
         }
     }
 
     fn deserialize_bool<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        self.skip_whitespace_and_comments();
+        self.skip_whitespace_and_comments()?;
         visitor.visit_bool(self.parse_bool()?)
     }
 
     fn deserialize_i8<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        self.skip_whitespace_and_comments();
+        self.skip_whitespace_and_comments()?;
         visitor.visit_i8(self.parse_int()?)
     }
 
     fn deserialize_i16<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        self.skip_whitespace_and_comments();
+        self.skip_whitespace_and_comments()?;
         visitor.visit_i16(self.parse_int()?)
     }
 
     fn deserialize_i32<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        self.skip_whitespace_and_comments();
+        self.skip_whitespace_and_comments()?;
         visitor.visit_i32(self.parse_int()?)
     }
 
     fn deserialize_i64<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        self.skip_whitespace_and_comments();
+        self.skip_whitespace_and_comments()?;
         visitor.visit_i64(self.parse_int()?)
     }
 
     fn deserialize_u8<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        self.skip_whitespace_and_comments();
+        self.skip_whitespace_and_comments()?;
         visitor.visit_u8(self.parse_int()?)
     }
 
     fn deserialize_u16<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        self.skip_whitespace_and_comments();
+        self.skip_whitespace_and_comments()?;
         visitor.visit_u16(self.parse_int()?)
     }
 
     fn deserialize_u32<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        self.skip_whitespace_and_comments();
+        self.skip_whitespace_and_comments()?;
         visitor.visit_u32(self.parse_int()?)
     }
 
     fn deserialize_u64<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        self.skip_whitespace_and_comments();
+        self.skip_whitespace_and_comments()?;
         // i64 can't represent all u64 values, so parse directly
-        let start = self.scanner.offset;
+        let start = self.offset();
         let text = self.scan_bare_string(Context::Block)?;
         let val: u64 = parse_unsigned(&text).ok_or_else(|| {
-            Error::Message(format!(
-                "{}:{}: expected unsigned integer, got `{text}`",
-                line_col(self.scanner.input, start).0,
-                line_col(self.scanner.input, start).1,
-            ))
+            self.error_at(&format!("expected unsigned integer, got `{text}`"), start)
         })?;
         visitor.visit_u64(val)
     }
 
     fn deserialize_f32<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        self.skip_whitespace_and_comments();
+        self.skip_whitespace_and_comments()?;
         self.parse_float(visitor)
     }
 
     fn deserialize_f64<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        self.skip_whitespace_and_comments();
+        self.skip_whitespace_and_comments()?;
         self.parse_float(visitor)
     }
 
     fn deserialize_char<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        self.skip_whitespace_and_comments();
+        self.skip_whitespace_and_comments()?;
         let s = self.scan_scalar_string(Context::Block)?;
         let mut chars = s.chars();
         let ch = chars
@@ -397,7 +507,7 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     }
 
     fn deserialize_str<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        self.skip_whitespace_and_comments();
+        self.skip_whitespace_and_comments()?;
         let s = self.scan_scalar_string(Context::Block)?;
         visitor.visit_string(s)
     }
@@ -407,7 +517,7 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     }
 
     fn deserialize_bytes<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        self.skip_whitespace_and_comments();
+        self.skip_whitespace_and_comments()?;
         let s = self.scan_scalar_string(Context::Block)?;
         visitor.visit_bytes(s.as_bytes())
     }
@@ -417,27 +527,33 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     }
 
     fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        self.skip_whitespace_and_comments();
+        self.skip_whitespace_and_comments()?;
         // Peek at whether this is `null`
-        if self.scanner.input[self.scanner.offset..].starts_with("null") {
-            // Check it's actually the bare word `null` (not `nullable` etc.)
-            let after = &self.scanner.input.as_bytes()[self.scanner.offset + 4..];
-            if after.is_empty()
-                || after[0] == b' '
-                || after[0] == b'\t'
-                || after[0] == b'\n'
-                || after[0] == b'\r'
-                || after[0] == b'#'
-            {
-                self.scanner.offset += 4;
-                return visitor.visit_none();
+        let off = self.offset();
+        self.read.fill_to(off + 5)?;
+        let is_null = {
+            let input = self.read.input();
+            if input[off..].starts_with("null") {
+                let after = &input.as_bytes()[off + 4..];
+                after.is_empty()
+                    || after[0] == b' '
+                    || after[0] == b'\t'
+                    || after[0] == b'\n'
+                    || after[0] == b'\r'
+                    || after[0] == b'#'
+            } else {
+                false
             }
+        };
+        if is_null {
+            self.set_offset(off + 4);
+            return visitor.visit_none();
         }
         visitor.visit_some(self)
     }
 
     fn deserialize_unit<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        self.skip_whitespace_and_comments();
+        self.skip_whitespace_and_comments()?;
         let text = self.scan_bare_string(Context::Block)?;
         if text == "null" {
             visitor.visit_unit()
@@ -527,8 +643,21 @@ fn is_plain_first(ch: char) -> bool {
     if is_indicator(ch) {
         ch == '-' || ch == ':'
     } else {
-        !ch.is_ascii_whitespace() && Scanner::is_printable(ch)
+        !ch.is_ascii_whitespace() && is_printable(ch)
     }
+}
+
+fn is_printable(ch: char) -> bool {
+    let cp = ch as u32;
+    matches!(
+        cp,
+        0x09 | 0x0A | 0x0D |
+        0x20..=0x7E |
+        0x85 |
+        0xA0..=0xD7FF |
+        0xE000..=0xFFFD |
+        0x10000..=0x10_FFFF
+    )
 }
 
 /// Try to parse as an AYML integer. Returns `Ok(Some(i64))` on success,
