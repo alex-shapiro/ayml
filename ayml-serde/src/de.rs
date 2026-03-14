@@ -421,7 +421,7 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
         // Peek at whether this is `null`
         if self.scanner.input[self.scanner.offset..].starts_with("null") {
             // Check it's actually the bare word `null` (not `nullable` etc.)
-            let after = self.scanner.input[self.scanner.offset + 4..].as_bytes();
+            let after = &self.scanner.input.as_bytes()[self.scanner.offset + 4..];
             if after.is_empty()
                 || after[0] == b' '
                 || after[0] == b'\t'
