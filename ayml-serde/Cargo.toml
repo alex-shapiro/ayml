@@ -5,4 +5,9 @@ edition = "2024"
 
 [dependencies]
 ayml-core = { path = "../ayml-core" }
+itoa = "1"
+ryu = "1"
 serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_bytes = "0.11"
