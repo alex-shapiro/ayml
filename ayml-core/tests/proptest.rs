@@ -6,13 +6,8 @@ use proptest::prelude::*;
 fn arb_map_key() -> impl Strategy<Value = MapKey> {
     prop_oneof![
         any::<bool>().prop_map(MapKey::Bool),
-        prop_oneof![
-            any::<i64>(),
-            Just(i64::MIN),
-            Just(i64::MAX),
-            Just(0_i64),
-        ]
-        .prop_map(MapKey::Int),
+        prop_oneof![any::<i64>(), Just(i64::MIN), Just(i64::MAX), Just(0_i64),]
+            .prop_map(MapKey::Int),
         prop_oneof![
             "[a-zA-Z_][a-zA-Z0-9_]{0,15}",
             // Keys that need quoting

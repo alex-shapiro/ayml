@@ -536,6 +536,7 @@ impl<'a> Parser<'a> {
 
     /// Parse a bare (unquoted) scalar with type resolution.
     fn parse_bare_scalar(&mut self, ctx: Context) -> Result<Node, Error> {
+        let start = self.scanner.offset;
         let text = self.scan_bare_string(ctx)?;
 
         // Scalar resolution: null → bool → int → float → string
@@ -545,12 +546,22 @@ impl<'a> Parser<'a> {
             Value::Bool(true)
         } else if text == "false" {
             Value::Bool(false)
-        } else if let Some(i) = Self::try_parse_int(&text) {
-            Value::Int(i)
-        } else if let Some(f) = Self::try_parse_float(&text) {
-            Value::Float(f)
         } else {
-            Value::Str(text)
+            match Self::try_parse_int(&text) {
+                Ok(Some(i)) => Value::Int(i),
+                Err(()) => {
+                    return Err(self
+                        .scanner
+                        .error_at(ErrorKind::IntegerOverflow, start));
+                }
+                Ok(None) => {
+                    if let Some(f) = Self::try_parse_float(&text) {
+                        Value::Float(f)
+                    } else {
+                        Value::Str(text)
+                    }
+                }
+            }
         };
 
         Ok(Node::new(value))
@@ -656,32 +667,48 @@ impl<'a> Parser<'a> {
 
     /// Try to parse a string as an AYML integer.
     ///
+    /// Returns `Ok(Some(i64))` if it's a valid integer, `Ok(None)` if the
+    /// string doesn't match the integer grammar, or `Err(())` if it matches
+    /// but overflows i64.
+    ///
     /// Parses the magnitude as `u64` then applies the sign via `i128`,
     /// so that `i64::MIN` is representable in all radixes.
-    fn try_parse_int(s: &str) -> Option<i64> {
+    fn try_parse_int(s: &str) -> Result<Option<i64>, ()> {
         let (unsigned, negative) = match s.strip_prefix('-') {
             Some(rest) => (rest, true),
             None => (s.strip_prefix('+').unwrap_or(s), false),
         };
 
         let abs = if let Some(bin) = unsigned.strip_prefix("0b") {
-            u64::from_str_radix(bin, 2).ok()?
+            match u64::from_str_radix(bin, 2) {
+                Ok(v) => v,
+                Err(_) if bin.chars().all(|c| c == '0' || c == '1') => return Err(()),
+                Err(_) => return Ok(None),
+            }
         } else if let Some(oct) = unsigned.strip_prefix("0o") {
-            u64::from_str_radix(oct, 8).ok()?
+            match u64::from_str_radix(oct, 8) {
+                Ok(v) => v,
+                Err(_) if oct.chars().all(|c| c.is_ascii_digit() && c < '8') => return Err(()),
+                Err(_) => return Ok(None),
+            }
         } else if let Some(hex) = unsigned.strip_prefix("0x") {
-            u64::from_str_radix(hex, 16).ok()?
+            match u64::from_str_radix(hex, 16) {
+                Ok(v) => v,
+                Err(_) if hex.chars().all(|c| c.is_ascii_hexdigit()) => return Err(()),
+                Err(_) => return Ok(None),
+            }
         } else {
             if unsigned.is_empty() || !unsigned.chars().all(|c| c.is_ascii_digit()) {
-                return None;
+                return Ok(None);
             }
-            unsigned.parse::<u64>().ok()?
+            match unsigned.parse::<u64>() {
+                Ok(v) => v,
+                Err(_) => return Err(()),
+            }
         };
 
-        if negative {
-            i64::try_from(-i128::from(abs)).ok()
-        } else {
-            i64::try_from(abs).ok()
-        }
+        let signed = if negative { -i128::from(abs) } else { i128::from(abs) };
+        i64::try_from(signed).map(Some).map_err(|_| ())
     }
 
     /// Try to parse a string as an AYML float.
@@ -1193,12 +1220,20 @@ impl<'a> Parser<'a> {
                     Ok(Some(RawMapKey::Valid(MapKey::Bool(true))))
                 } else if text == "false" {
                     Ok(Some(RawMapKey::Valid(MapKey::Bool(false))))
-                } else if let Some(i) = Self::try_parse_int(&text) {
-                    Ok(Some(RawMapKey::Valid(MapKey::Int(i))))
-                } else if Self::try_parse_float(&text).is_some() {
-                    Ok(Some(RawMapKey::Float(saved)))
                 } else {
-                    Ok(Some(RawMapKey::Valid(MapKey::String(text))))
+                    match Self::try_parse_int(&text) {
+                        Ok(Some(i)) => Ok(Some(RawMapKey::Valid(MapKey::Int(i)))),
+                        Err(()) => Err(self
+                            .scanner
+                            .error_at(ErrorKind::IntegerOverflow, saved)),
+                        Ok(None) => {
+                            if Self::try_parse_float(&text).is_some() {
+                                Ok(Some(RawMapKey::Float(saved)))
+                            } else {
+                                Ok(Some(RawMapKey::Valid(MapKey::String(text))))
+                            }
+                        }
+                    }
                 }
             }
             _ => Ok(None),

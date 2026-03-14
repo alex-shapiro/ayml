@@ -1,4 +1,4 @@
-use ayml_core::{MapKey, Value, parse};
+use ayml_core::{ErrorKind, MapKey, Value, parse};
 
 // ── Null ─────────────────────────────────────────────────────────
 
@@ -98,23 +98,15 @@ fn integer_i64_min() {
 }
 
 #[test]
-fn integer_overflow_becomes_string() {
-    let node = parse("n: 9223372036854775808").unwrap();
-    let map = node.value.as_mapping().unwrap();
-    assert_eq!(
-        map[&MapKey::String("n".into())].value,
-        Value::Str("9223372036854775808".into())
-    );
+fn integer_overflow_is_error() {
+    let err = parse("n: 9223372036854775808").unwrap_err();
+    assert!(matches!(err.kind, ErrorKind::IntegerOverflow));
 }
 
 #[test]
-fn integer_negative_overflow_becomes_string() {
-    let node = parse("n: -9223372036854775809").unwrap();
-    let map = node.value.as_mapping().unwrap();
-    assert_eq!(
-        map[&MapKey::String("n".into())].value,
-        Value::Str("-9223372036854775809".into())
-    );
+fn integer_negative_overflow_is_error() {
+    let err = parse("n: -9223372036854775809").unwrap_err();
+    assert!(matches!(err.kind, ErrorKind::IntegerOverflow));
 }
 
 #[test]
