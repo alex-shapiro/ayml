@@ -30,13 +30,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ayml-ffi"
-version = "0.1.0"
-dependencies = [
- "ayml-core",
-]
-
-[[package]]
 name = "ayml-serde"
 version = "0.1.0"
 dependencies = [

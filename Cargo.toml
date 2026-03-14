@@ -2,7 +2,6 @@
 members = [
     "ayml-core",
     "ayml-serde",
-    "ayml-ffi",
     "ayml",
 ]
 resolver = "3"
