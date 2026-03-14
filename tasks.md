@@ -1,55 +1,72 @@
 # ayml-serde: bytes <=> types
 
-## Phase 1: Extract shared primitives from ayml-core
+Outside-in implementation. Start with the public API surface using `todo!()`,
+then work inward until everything is functional.
 
-### 1. Make `Scanner` public
-Expose `Scanner` as a public type from ayml-core so ayml-serde can use it directly.
-Currently `pub` within the parser module but not re-exported from the crate root.
+## 1. Scaffold public API with `todo!()`
 
-### 2. Extract scalar resolution into standalone functions
-Factor `parse_bare_scalar`, `try_parse_int`, `try_parse_float`, and the
-null/bool keyword matching out of `Parser` into free functions that operate on
-`&mut Scanner` and return a type-tag + borrowed slice (not `Value`/`Node`).
-`Parser` calls these new functions internally so behavior is unchanged.
+Stand up the six entry points in ayml-serde with `todo!()` bodies:
 
-### 3. Extract structural parsing helpers
-Factor out the indentation/structure detection logic — `skip_blank_lines`,
-`skip_block_gaps`, comment skipping, and the "what comes next?" peek logic
-(is it `- `, `key:`, `[`, `{`, or a scalar?) — into free functions on
-`&mut Scanner` + indent level. `Parser` calls these internally.
+- `de::from_reader<R: Read, T: DeserializeOwned>(rdr: R) -> Result<T>` (std)
+- `de::from_slice<T: DeserializeOwned>(bytes: &[u8]) -> Result<T>`
+- `de::from_str<T: DeserializeOwned>(s: &str) -> Result<T>`
+- `ser::to_string<T: Serialize>(value: &T) -> Result<String>`
+- `ser::to_vec<T: Serialize>(value: &T) -> Result<Vec<u8>>`
+- `ser::to_writer<W: Write, T: Serialize>(writer: W, value: &T) -> Result<()>` (std)
 
-### 4. Extract double-quoted and triple-quoted string parsing
-Factor `parse_double_quoted` and `parse_triple_quoted` out of `Parser` into
-free functions on `&mut Scanner` that return `String` (not `Node`). `Parser`
-wraps the result in `Node::new(Value::Str(...))`.
+Define the crate's `Error` type (implementing `serde::de::Error` +
+`serde::ser::Error`) and a `Result<T>` alias. Wire up re-exports from
+`lib.rs`.
 
-### 5. Make emitter primitives public
-Expose `needs_quoting`, `emit_float`, `emit_string`, `emit_map_key`, and
-`emit_indent` as public functions from ayml-core so the serde serializer can
-write AYML directly without building a `Value` tree.
+## 2. Implement `Deserializer` for scalars
 
-### 6. Extend `ErrorKind` for serde
-Add `Message(String)` variant to `ErrorKind`. Implement `serde::de::Error`
-and `serde::ser::Error` for `Error` behind a `serde` cargo feature flag on
-ayml-core.
+Implement `serde::de::Deserializer` backed by a `Scanner`. Handle all
+scalar `deserialize_*` methods (bool, integers, floats, str, string,
+bytes, option, unit, newtype_struct). `deserialize_any` resolves bare
+scalars using AYML precedence. Sequence/map/struct/enum methods remain
+`todo!()`. `from_str` becomes functional for scalar types.
 
-## Phase 2: Implement ayml-serde
+## 3. Implement `Deserializer` for collections
 
-### 7. Implement streaming `Deserializer`
-Implement `serde::de::Deserializer` directly over `Scanner` using the
-extracted primitives from phase 1. Includes `SeqAccess`, `MapAccess`, and
-`EnumAccess` impls. Drives parsing on-demand as the visitor requests types.
-Public API: `ayml_serde::from_str<T: DeserializeOwned>(s: &str) -> Result<T, Error>`.
+Implement `SeqAccess` and `MapAccess` for both block and flow
+collections. Handle `deserialize_seq`, `deserialize_map`,
+`deserialize_struct`, `deserialize_tuple`. Indentation tracking and
+comment skipping driven by the scanner on demand.
 
-### 8. Implement streaming `Serializer`
-Implement `serde::ser::Serializer` that writes AYML bytes directly using the
-extracted emitter primitives. Manages indentation and block/flow style as
-serde calls `serialize_*` methods. Includes `SerializeSeq`, `SerializeMap`,
-`SerializeStruct`, etc.
-Public API: `ayml_serde::to_string<T: Serialize>(value: &T) -> Result<String, Error>`.
+## 4. Implement `Deserializer` for enums
 
-### 9. Test suite
-Roundtrip tests (deserialize then serialize) against spec examples and edge
-cases. Compatibility tests ensuring `from_str` produces the same results as
+Implement `EnumAccess` and `VariantAccess`. Handle unit variants,
+newtype variants, tuple variants, and struct variants. Covers
+`deserialize_enum`.
+
+## 5. Implement `Serializer` for scalars
+
+Implement `serde::ser::Serializer` that writes directly to an output
+buffer. Handle all scalar `serialize_*` methods (bool, integers, floats,
+str, bytes, unit, none/some, newtype_struct). Sequence/map/struct methods
+remain `todo!()`. `to_string` becomes functional for scalar types.
+
+## 6. Implement `Serializer` for collections
+
+Implement `SerializeSeq`, `SerializeMap`, `SerializeTuple`,
+`SerializeStruct`, `SerializeTupleStruct`. Manage indentation state
+and block-style formatting as elements are serialized.
+
+## 7. Implement `Serializer` for enums
+
+Implement `SerializeStructVariant` and `SerializeTupleVariant`.
+Handle all enum representations.
+
+## 8. Implement reader/writer entry points
+
+Fill in `from_reader`, `from_slice`, `to_vec`, `to_writer` (the
+non-str entry points). `from_slice`/`from_reader` convert to `&str`
+(AYML is UTF-8) then delegate to `from_str`. `to_vec`/`to_writer`
+delegate through `to_string`.
+
+## 9. Test suite
+
+Roundtrip tests (deserialize then serialize) against spec examples and
+edge cases. Compatibility tests ensuring `from_str` agrees with
 `ayml_core::parse` for all existing ayml-core test inputs. Serde-specific
 tests: structs, enums, Options, nested types, error cases.
