@@ -296,20 +296,20 @@ impl<'a, W: std::io::Write> ser::Serializer for &'a mut Serializer<W> {
             first: true,
             bumped: false,
             variant_bumped: false,
-            commentable: false,
+            commented: false,
             top_comment: None,
             inline_comment: None,
         })
     }
 
     fn serialize_struct(self, name: &'static str, _len: usize) -> Result<Self::SerializeStruct> {
-        if name == crate::commentable::COMMENTABLE_STRUCT {
+        if name == crate::commentable::COMMENTED_STRUCT {
             return Ok(Compound {
                 ser: self,
                 first: true,
                 bumped: false,
                 variant_bumped: false,
-                commentable: true,
+                commented: true,
                 top_comment: None,
                 inline_comment: None,
             });
@@ -433,11 +433,11 @@ struct Compound<'a, W> {
     bumped: bool,
     /// True if variant_key_prefix already bumped indent (for struct variants).
     variant_bumped: bool,
-    /// True when this Compound represents a `Commentable<T>`.
-    commentable: bool,
-    /// Buffered top comment for commentable mode.
+    /// True when this Compound represents a `Commented<T>`.
+    commented: bool,
+    /// Buffered top comment for commented mode.
     top_comment: Option<String>,
-    /// Buffered inline comment for commentable mode.
+    /// Buffered inline comment for commented mode.
     inline_comment: Option<String>,
 }
 
@@ -463,8 +463,8 @@ impl<W: std::io::Write> Compound<'_, W> {
         Ok(())
     }
 
-    /// Handle a field within a `Commentable<T>` struct.
-    fn serialize_commentable_field<T: ?Sized + Serialize>(
+    /// Handle a field within a `Commented<T>` struct.
+    fn serialize_commented_field<T: ?Sized + Serialize>(
         &mut self,
         key: &'static str,
         value: &T,
@@ -516,8 +516,8 @@ impl<W: std::io::Write> Compound<'_, W> {
     }
 
     fn end_compound(self) -> Result<()> {
-        if self.commentable {
-            // Commentable compound — just undo any indent bumps
+        if self.commented {
+            // Commented compound — just undo any indent bumps
             if self.bumped {
                 self.ser.indent -= 2;
             }
@@ -571,8 +571,8 @@ impl<W: std::io::Write> ser::SerializeStruct for Compound<'_, W> {
         key: &'static str,
         value: &T,
     ) -> Result<()> {
-        if self.commentable {
-            return self.serialize_commentable_field(key, value);
+        if self.commented {
+            return self.serialize_commented_field(key, value);
         }
         self.write_key_prefix()?;
         self.ser.write_str(key)?;
@@ -603,7 +603,7 @@ impl<W: std::io::Write> ser::SerializeStructVariant for Compound<'_, W> {
     }
 }
 
-// ── Commentable helpers ─────────────────────────────────────────
+// ── Commented helpers ───────────────────────────────────────────
 
 /// Serialize a value (expected to be `Option<String>`) and capture it.
 fn capture_option_string<T: ?Sized + Serialize>(value: &T) -> Option<String> {

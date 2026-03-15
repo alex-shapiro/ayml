@@ -61,7 +61,7 @@ pub(crate) struct Deserializer<R> {
     /// `deserialize_any` from re-detecting the colon as a new mapping.
     reading_key: bool,
     /// Buffered top comment (lines preceding a value), captured during
-    /// whitespace/comment skipping for `Commentable<T>` support.
+    /// whitespace/comment skipping for `Commented<T>` support.
     pending_top_comment: Option<String>,
 }
 
@@ -547,18 +547,18 @@ impl<'de, R: Read<'de>> Deserializer<R> {
         }
     }
 
-    /// Handle `Commentable<T>` deserialization: present a virtual map with
+    /// Handle `Commented<T>` deserialization: present a virtual map with
     /// `__top_comment__`, `__value__`, and `__inline_comment__` entries.
-    fn deserialize_commentable<V: de::Visitor<'de>>(&mut self, visitor: V) -> Result<V::Value> {
+    fn deserialize_commented<V: de::Visitor<'de>>(&mut self, visitor: V) -> Result<V::Value> {
         // Skip whitespace/comments so that a top comment indented under the
         // key (e.g. after "key:\n  # comment\n  value") is captured before
         // we take the pending comment.
         self.skip_whitespace_and_comments()?;
         let top_comment = self.pending_top_comment.take();
-        visitor.visit_map(CommentableAccess {
+        visitor.visit_map(CommentedAccess {
             de: self,
             top_comment,
-            state: CommentableState::TopComment,
+            state: CommentedState::TopComment,
         })
     }
 
@@ -870,8 +870,8 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
         _fields: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value> {
-        if name == crate::commentable::COMMENTABLE_STRUCT {
-            return self.deserialize_commentable(visitor);
+        if name == crate::commentable::COMMENTED_STRUCT {
+            return self.deserialize_commented(visitor);
         }
         self.deserialize_map(visitor)
     }
@@ -1165,22 +1165,22 @@ impl<'a, 'de, R: Read<'de>> de::MapAccess<'de> for MapAccess<'a, R> {
     }
 }
 
-// ── CommentableAccess (virtual MapAccess for Commentable<T>) ──────
+// ── CommentedAccess (virtual MapAccess for Commented<T>) ──────
 
-enum CommentableState {
+enum CommentedState {
     TopComment,
     Value,
     InlineComment,
     Done,
 }
 
-struct CommentableAccess<'a, R> {
+struct CommentedAccess<'a, R> {
     de: &'a mut Deserializer<R>,
     top_comment: Option<String>,
-    state: CommentableState,
+    state: CommentedState,
 }
 
-impl<'a, 'de, R: Read<'de>> de::MapAccess<'de> for CommentableAccess<'a, R> {
+impl<'a, 'de, R: Read<'de>> de::MapAccess<'de> for CommentedAccess<'a, R> {
     type Error = Error;
 
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>
@@ -1189,10 +1189,10 @@ impl<'a, 'de, R: Read<'de>> de::MapAccess<'de> for CommentableAccess<'a, R> {
     {
         use crate::commentable::*;
         let key = match self.state {
-            CommentableState::TopComment => FIELD_TOP_COMMENT,
-            CommentableState::Value => FIELD_VALUE,
-            CommentableState::InlineComment => FIELD_INLINE_COMMENT,
-            CommentableState::Done => return Ok(None),
+            CommentedState::TopComment => FIELD_TOP_COMMENT,
+            CommentedState::Value => FIELD_VALUE,
+            CommentedState::InlineComment => FIELD_INLINE_COMMENT,
+            CommentedState::Done => return Ok(None),
         };
         seed.deserialize(de::value::BorrowedStrDeserializer::new(key))
             .map(Some)
@@ -1203,21 +1203,21 @@ impl<'a, 'de, R: Read<'de>> de::MapAccess<'de> for CommentableAccess<'a, R> {
         V: de::DeserializeSeed<'de>,
     {
         match self.state {
-            CommentableState::TopComment => {
-                self.state = CommentableState::Value;
+            CommentedState::TopComment => {
+                self.state = CommentedState::Value;
                 let comment = self.top_comment.take();
                 seed.deserialize(OptionStringDeserializer(comment))
             }
-            CommentableState::Value => {
-                self.state = CommentableState::InlineComment;
+            CommentedState::Value => {
+                self.state = CommentedState::InlineComment;
                 seed.deserialize(&mut *self.de)
             }
-            CommentableState::InlineComment => {
-                self.state = CommentableState::Done;
+            CommentedState::InlineComment => {
+                self.state = CommentedState::Done;
                 let comment = self.de.capture_inline_comment()?;
                 seed.deserialize(OptionStringDeserializer(comment))
             }
-            CommentableState::Done => Err(self.de.error("CommentableAccess: unexpected state")),
+            CommentedState::Done => Err(self.de.error("CommentedAccess: unexpected state")),
         }
     }
 }

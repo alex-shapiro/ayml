@@ -1,10 +1,10 @@
 //! A fully comment-preserving untyped AYML value.
 //!
-//! [`CommentedValue`] is `Commentable<CommentedValueKind>` — every node in the
+//! [`CommentedValue`] is `Commented<CommentedValueKind>` — every node in the
 //! tree carries optional top and inline comments, and the recursive children
 //! (sequences and mappings) are themselves `CommentedValue`s.
 
-use crate::Commentable;
+use crate::Commented;
 use serde::de::{self, Visitor};
 use serde::ser;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -13,8 +13,8 @@ use std::fmt;
 
 /// An untyped AYML value where every node preserves its comments.
 ///
-/// This is a type alias for `Commentable<CommentedValueKind>`.
-pub type CommentedValue = Commentable<CommentedValueKind>;
+/// This is a type alias for `Commented<CommentedValueKind>`.
+pub type CommentedValue = Commented<CommentedValueKind>;
 
 /// The kind of value inside a [`CommentedValue`].
 ///
@@ -23,7 +23,7 @@ pub type CommentedValue = Commentable<CommentedValueKind>;
 ///
 /// Uses custom Serialize/Deserialize impls via `deserialize_any` rather than
 /// `#[serde(untagged)]`, because untagged enums buffer content through serde's
-/// internal `ContentDeserializer` which doesn't support `Commentable<T>`'s
+/// internal `ContentDeserializer` which doesn't support `Commented<T>`'s
 /// magic struct name detection.
 #[derive(Debug, Clone)]
 pub enum CommentedValueKind {

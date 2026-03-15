@@ -7,7 +7,7 @@ use std::fmt;
 use std::marker::PhantomData;
 
 /// Magic struct name used to signal comment-aware (de)serialization.
-pub(crate) const COMMENTABLE_STRUCT: &str = "__commentable__";
+pub(crate) const COMMENTED_STRUCT: &str = "__commented__";
 pub(crate) const FIELD_TOP_COMMENT: &str = "__top_comment__";
 pub(crate) const FIELD_INLINE_COMMENT: &str = "__inline_comment__";
 pub(crate) const FIELD_VALUE: &str = "__value__";
@@ -25,7 +25,7 @@ pub(crate) const FIELD_VALUE: &str = "__value__";
 /// ```rust,ignore
 /// #[derive(Deserialize)]
 /// struct Config {
-///     port: Commentable<u16>,
+///     port: Commented<u16>,
 /// }
 /// let c: Config = ayml_serde::from_str(input)?;
 /// assert_eq!(c.port.value, 8080);
@@ -37,7 +37,7 @@ pub(crate) const FIELD_VALUE: &str = "__value__";
 /// positions. For non-AYML serializers, the comments are serialized as
 /// struct fields and are losslessly preserved.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Commentable<T> {
+pub struct Commented<T> {
     /// Comment line(s) preceding the value. Multi-line comments are
     /// joined with `\n`. Does not include the `# ` prefix.
     pub top_comment: Option<String>,
@@ -47,7 +47,7 @@ pub struct Commentable<T> {
     pub value: T,
 }
 
-impl<T> Commentable<T> {
+impl<T> Commented<T> {
     /// Wrap a value with no comments.
     pub fn new(value: T) -> Self {
         Self {
@@ -58,9 +58,9 @@ impl<T> Commentable<T> {
     }
 }
 
-impl<T: Serialize> Serialize for Commentable<T> {
+impl<T: Serialize> Serialize for Commented<T> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut s = serializer.serialize_struct(COMMENTABLE_STRUCT, 3)?;
+        let mut s = serializer.serialize_struct(COMMENTED_STRUCT, 3)?;
         s.serialize_field(FIELD_TOP_COMMENT, &self.top_comment)?;
         s.serialize_field(FIELD_INLINE_COMMENT, &self.inline_comment)?;
         s.serialize_field(FIELD_VALUE, &self.value)?;
@@ -68,20 +68,20 @@ impl<T: Serialize> Serialize for Commentable<T> {
     }
 }
 
-impl<'de, T: Deserialize<'de>> Deserialize<'de> for Commentable<T> {
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Commented<T> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         const FIELDS: &[&str] = &[FIELD_TOP_COMMENT, FIELD_INLINE_COMMENT, FIELD_VALUE];
-        deserializer.deserialize_struct(COMMENTABLE_STRUCT, FIELDS, CommentableVisitor(PhantomData))
+        deserializer.deserialize_struct(COMMENTED_STRUCT, FIELDS, CommentedVisitor(PhantomData))
     }
 }
 
-struct CommentableVisitor<T>(PhantomData<T>);
+struct CommentedVisitor<T>(PhantomData<T>);
 
-impl<'de, T: Deserialize<'de>> Visitor<'de> for CommentableVisitor<T> {
-    type Value = Commentable<T>;
+impl<'de, T: Deserialize<'de>> Visitor<'de> for CommentedVisitor<T> {
+    type Value = Commented<T>;
 
     fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "a commentable value")
+        write!(f, "a commented value")
     }
 
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
@@ -108,7 +108,7 @@ impl<'de, T: Deserialize<'de>> Visitor<'de> for CommentableVisitor<T> {
         }
 
         let value = value.ok_or_else(|| de::Error::missing_field(FIELD_VALUE))?;
-        Ok(Commentable {
+        Ok(Commented {
             top_comment,
             inline_comment,
             value,

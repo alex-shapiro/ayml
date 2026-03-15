@@ -1,13 +1,13 @@
-mod commented_value;
 mod commentable;
+mod commented_value;
 pub mod de;
 mod error;
 mod read;
 pub mod ser;
 mod value;
 
+pub use commentable::Commented;
 pub use commented_value::{CommentedValue, CommentedValueKind};
-pub use commentable::Commentable;
 pub use error::{Error, Result};
 pub use value::Value;
 

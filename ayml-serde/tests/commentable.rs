@@ -1,13 +1,13 @@
-use ayml_serde::Commentable;
+use ayml_serde::Commented;
 use serde::{Deserialize, Serialize};
 
 // ── Deserialization tests ───────────────────────────────────────────
 
 #[test]
-fn de_commentable_inline_comment() {
+fn de_commented_inline_comment() {
     #[derive(Deserialize, Debug)]
     struct Config {
-        port: Commentable<u16>,
+        port: Commented<u16>,
     }
     let input = "port: 8080 # the port\n";
     let c: Config = ayml_serde::from_str(input).unwrap();
@@ -17,10 +17,10 @@ fn de_commentable_inline_comment() {
 }
 
 #[test]
-fn de_commentable_top_comment() {
+fn de_commented_top_comment() {
     #[derive(Deserialize, Debug)]
     struct Config {
-        port: Commentable<u16>,
+        port: Commented<u16>,
     }
     let input = "# listen port\nport: 8080\n";
     let c: Config = ayml_serde::from_str(input).unwrap();
@@ -30,10 +30,10 @@ fn de_commentable_top_comment() {
 }
 
 #[test]
-fn de_commentable_both_comments() {
+fn de_commented_both_comments() {
     #[derive(Deserialize, Debug)]
     struct Config {
-        port: Commentable<u16>,
+        port: Commented<u16>,
     }
     let input = "# listen port\nport: 8080 # default\n";
     let c: Config = ayml_serde::from_str(input).unwrap();
@@ -43,10 +43,10 @@ fn de_commentable_both_comments() {
 }
 
 #[test]
-fn de_commentable_no_comments() {
+fn de_commented_no_comments() {
     #[derive(Deserialize, Debug)]
     struct Config {
-        port: Commentable<u16>,
+        port: Commented<u16>,
     }
     let input = "port: 8080\n";
     let c: Config = ayml_serde::from_str(input).unwrap();
@@ -56,10 +56,10 @@ fn de_commentable_no_comments() {
 }
 
 #[test]
-fn de_commentable_multiline_top_comment() {
+fn de_commented_multiline_top_comment() {
     #[derive(Deserialize, Debug)]
     struct Config {
-        port: Commentable<u16>,
+        port: Commented<u16>,
     }
     let input = "# line one\n# line two\nport: 8080\n";
     let c: Config = ayml_serde::from_str(input).unwrap();
@@ -68,10 +68,10 @@ fn de_commentable_multiline_top_comment() {
 }
 
 #[test]
-fn de_commentable_string_value() {
+fn de_commented_string_value() {
     #[derive(Deserialize, Debug)]
     struct Config {
-        name: Commentable<String>,
+        name: Commented<String>,
     }
     let input = "# the name\nname: hello # greeting\n";
     let c: Config = ayml_serde::from_str(input).unwrap();
@@ -81,10 +81,10 @@ fn de_commentable_string_value() {
 }
 
 #[test]
-fn de_commentable_bool_value() {
+fn de_commented_bool_value() {
     #[derive(Deserialize, Debug)]
     struct Config {
-        debug: Commentable<bool>,
+        debug: Commented<bool>,
     }
     let input = "debug: true # enable debug\n";
     let c: Config = ayml_serde::from_str(input).unwrap();
@@ -93,11 +93,11 @@ fn de_commentable_bool_value() {
 }
 
 #[test]
-fn de_commentable_multiple_fields() {
+fn de_commented_multiple_fields() {
     #[derive(Deserialize, Debug)]
     struct Config {
-        host: Commentable<String>,
-        port: Commentable<u16>,
+        host: Commented<String>,
+        port: Commented<u16>,
     }
     let input = "# hostname\nhost: localhost # server\n# port number\nport: 3000\n";
     let c: Config = ayml_serde::from_str(input).unwrap();
@@ -110,11 +110,11 @@ fn de_commentable_multiple_fields() {
 }
 
 #[test]
-fn de_commentable_mixed_with_plain() {
+fn de_commented_mixed_with_plain() {
     #[derive(Deserialize, Debug)]
     struct Config {
         host: String,
-        port: Commentable<u16>,
+        port: Commented<u16>,
         debug: bool,
     }
     let input = "host: localhost\n# the port\nport: 8080 # default\ndebug: false\n";
@@ -129,13 +129,13 @@ fn de_commentable_mixed_with_plain() {
 // ── Serialization tests ─────────────────────────────────────────────
 
 #[test]
-fn ser_commentable_inline_comment() {
+fn ser_commented_inline_comment() {
     #[derive(Serialize)]
     struct Config {
-        port: Commentable<u16>,
+        port: Commented<u16>,
     }
     let c = Config {
-        port: Commentable {
+        port: Commented {
             top_comment: None,
             inline_comment: Some("the port".into()),
             value: 8080,
@@ -146,13 +146,13 @@ fn ser_commentable_inline_comment() {
 }
 
 #[test]
-fn ser_commentable_top_comment() {
+fn ser_commented_top_comment() {
     #[derive(Serialize)]
     struct Config {
-        port: Commentable<u16>,
+        port: Commented<u16>,
     }
     let c = Config {
-        port: Commentable {
+        port: Commented {
             top_comment: Some("listen port".into()),
             inline_comment: None,
             value: 8080,
@@ -163,13 +163,13 @@ fn ser_commentable_top_comment() {
 }
 
 #[test]
-fn ser_commentable_both_comments() {
+fn ser_commented_both_comments() {
     #[derive(Serialize)]
     struct Config {
-        port: Commentable<u16>,
+        port: Commented<u16>,
     }
     let c = Config {
-        port: Commentable {
+        port: Commented {
             top_comment: Some("listen port".into()),
             inline_comment: Some("default".into()),
             value: 8080,
@@ -180,13 +180,13 @@ fn ser_commentable_both_comments() {
 }
 
 #[test]
-fn ser_commentable_no_comments() {
+fn ser_commented_no_comments() {
     #[derive(Serialize)]
     struct Config {
-        port: Commentable<u16>,
+        port: Commented<u16>,
     }
     let c = Config {
-        port: Commentable {
+        port: Commented {
             top_comment: None,
             inline_comment: None,
             value: 8080,
@@ -197,13 +197,13 @@ fn ser_commentable_no_comments() {
 }
 
 #[test]
-fn ser_commentable_multiline_top_comment() {
+fn ser_commented_multiline_top_comment() {
     #[derive(Serialize)]
     struct Config {
-        port: Commentable<u16>,
+        port: Commented<u16>,
     }
     let c = Config {
-        port: Commentable {
+        port: Commented {
             top_comment: Some("line one\nline two".into()),
             inline_comment: None,
             value: 8080,
@@ -216,10 +216,10 @@ fn ser_commentable_multiline_top_comment() {
 // ── Roundtrip tests ─────────────────────────────────────────────────
 
 #[test]
-fn roundtrip_commentable_inline() {
+fn roundtrip_commented_inline() {
     #[derive(Serialize, Deserialize, Debug, PartialEq)]
     struct Config {
-        port: Commentable<u16>,
+        port: Commented<u16>,
     }
     let input = "port: 8080 # the port\n";
     let c: Config = ayml_serde::from_str(input).unwrap();
@@ -228,10 +228,10 @@ fn roundtrip_commentable_inline() {
 }
 
 #[test]
-fn roundtrip_commentable_no_comments() {
+fn roundtrip_commented_no_comments() {
     #[derive(Serialize, Deserialize, Debug, PartialEq)]
     struct Config {
-        port: Commentable<u16>,
+        port: Commented<u16>,
     }
     let input = "port: 8080\n";
     let c: Config = ayml_serde::from_str(input).unwrap();
@@ -240,10 +240,10 @@ fn roundtrip_commentable_no_comments() {
 }
 
 #[test]
-fn roundtrip_commentable_both_comments() {
+fn roundtrip_commented_both_comments() {
     #[derive(Serialize, Deserialize, Debug, PartialEq)]
     struct Config {
-        port: Commentable<u16>,
+        port: Commented<u16>,
     }
     let input = "port:\n  # listen port\n  8080 # default\n";
     let c: Config = ayml_serde::from_str(input).unwrap();
@@ -255,19 +255,19 @@ fn roundtrip_commentable_both_comments() {
 }
 
 #[test]
-fn roundtrip_commentable_multiple_fields() {
+fn roundtrip_commented_multiple_fields() {
     #[derive(Serialize, Deserialize, Debug, PartialEq)]
     struct Config {
-        host: Commentable<String>,
-        port: Commentable<u16>,
+        host: Commented<String>,
+        port: Commented<u16>,
     }
     let c = Config {
-        host: Commentable {
+        host: Commented {
             top_comment: Some("hostname".into()),
             inline_comment: None,
             value: "localhost".into(),
         },
-        port: Commentable {
+        port: Commented {
             top_comment: None,
             inline_comment: Some("default".into()),
             value: 3000,
