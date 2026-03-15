@@ -258,10 +258,7 @@ fn roundtrip_vec_integers() {
 
 #[test]
 fn roundtrip_vec_strings() {
-    roundtrip(&vec![
-        String::from("hello"),
-        String::from("world"),
-    ]);
+    roundtrip(&vec![String::from("hello"), String::from("world")]);
 }
 
 #[test]
@@ -359,9 +356,7 @@ fn roundtrip_struct_deeply_nested() {
         value: i32,
     }
     roundtrip(&A {
-        b: B {
-            c: C { value: 99 },
-        },
+        b: B { c: C { value: 99 } },
     });
 }
 

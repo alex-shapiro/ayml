@@ -23,10 +23,7 @@ fn de_trailing_whitespace() {
 #[test]
 fn de_leading_comment() {
     assert_eq!(from_str::<i32>("# a comment\n42").unwrap(), 42);
-    assert_eq!(
-        from_str::<i32>("# line1\n# line2\n42").unwrap(),
-        42
-    );
+    assert_eq!(from_str::<i32>("# line1\n# line2\n42").unwrap(), 42);
 }
 
 #[test]
@@ -162,10 +159,7 @@ fn de_any_string() {
         Float(f64),
         Str(String),
     }
-    assert_eq!(
-        from_str::<Any>("hello").unwrap(),
-        Any::Str("hello".into())
-    );
+    assert_eq!(from_str::<Any>("hello").unwrap(), Any::Str("hello".into()));
 }
 
 #[test]
@@ -335,10 +329,7 @@ fn de_from_reader_struct() {
 #[test]
 fn de_from_slice_basic() {
     assert_eq!(ayml_serde::from_slice::<i32>(b"42").unwrap(), 42);
-    assert_eq!(
-        ayml_serde::from_slice::<String>(b"hello").unwrap(),
-        "hello"
-    );
+    assert_eq!(ayml_serde::from_slice::<String>(b"hello").unwrap(), "hello");
 }
 
 // ── Struct field rename ─────────────────────────────────────────
