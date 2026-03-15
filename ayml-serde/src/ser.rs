@@ -296,10 +296,24 @@ impl<'a, W: std::io::Write> ser::Serializer for &'a mut Serializer<W> {
             first: true,
             bumped: false,
             variant_bumped: false,
+            commentable: false,
+            top_comment: None,
+            inline_comment: None,
         })
     }
 
-    fn serialize_struct(self, _name: &'static str, _len: usize) -> Result<Self::SerializeStruct> {
+    fn serialize_struct(self, name: &'static str, _len: usize) -> Result<Self::SerializeStruct> {
+        if name == crate::commentable::COMMENTABLE_STRUCT {
+            return Ok(Compound {
+                ser: self,
+                first: true,
+                bumped: false,
+                variant_bumped: false,
+                commentable: true,
+                top_comment: None,
+                inline_comment: None,
+            });
+        }
         self.serialize_map(None)
     }
 
@@ -419,6 +433,12 @@ struct Compound<'a, W> {
     bumped: bool,
     /// True if variant_key_prefix already bumped indent (for struct variants).
     variant_bumped: bool,
+    /// True when this Compound represents a `Commentable<T>`.
+    commentable: bool,
+    /// Buffered top comment for commentable mode.
+    top_comment: Option<String>,
+    /// Buffered inline comment for commentable mode.
+    inline_comment: Option<String>,
 }
 
 impl<W: std::io::Write> Compound<'_, W> {
@@ -443,7 +463,66 @@ impl<W: std::io::Write> Compound<'_, W> {
         Ok(())
     }
 
+    /// Handle a field within a `Commentable<T>` struct.
+    fn serialize_commentable_field<T: ?Sized + Serialize>(
+        &mut self,
+        key: &'static str,
+        value: &T,
+    ) -> Result<()> {
+        use crate::commentable::*;
+        match key {
+            FIELD_TOP_COMMENT => {
+                self.top_comment = capture_option_string(value);
+                Ok(())
+            }
+            FIELD_INLINE_COMMENT => {
+                self.inline_comment = capture_option_string(value);
+                Ok(())
+            }
+            FIELD_VALUE => {
+                // Emit top comment if present
+                if let Some(ref comment) = self.top_comment {
+                    if self.ser.after_key {
+                        self.ser.write_str("\n")?;
+                        self.ser.after_key = false;
+                        self.ser.indent += 2;
+                        self.bumped = true;
+                    }
+                    for line in comment.lines() {
+                        self.ser.write_indent()?;
+                        self.ser.write_str("# ")?;
+                        self.ser.write_str(line)?;
+                        self.ser.write_str("\n")?;
+                    }
+                    // Write indent for the value and set compact so
+                    // collections don't double-indent.
+                    self.ser.write_indent()?;
+                    self.ser.compact = true;
+                }
+                // Serialize the actual value
+                value.serialize(&mut *self.ser)?;
+                // Emit inline comment if present
+                if let Some(ref comment) = self.inline_comment {
+                    self.ser.write_str(" # ")?;
+                    self.ser.write_str(comment)?;
+                }
+                Ok(())
+            }
+            _ => {
+                // Unknown field — serialize normally
+                value.serialize(&mut *self.ser)
+            }
+        }
+    }
+
     fn end_compound(self) -> Result<()> {
+        if self.commentable {
+            // Commentable compound — just undo any indent bumps
+            if self.bumped {
+                self.ser.indent -= 2;
+            }
+            return Ok(());
+        }
         if self.first {
             // Empty map — use flow style
             if self.ser.after_key {
@@ -492,6 +571,9 @@ impl<W: std::io::Write> ser::SerializeStruct for Compound<'_, W> {
         key: &'static str,
         value: &T,
     ) -> Result<()> {
+        if self.commentable {
+            return self.serialize_commentable_field(key, value);
+        }
         self.write_key_prefix()?;
         self.ser.write_str(key)?;
         self.ser.write_str(":")?;
@@ -519,6 +601,149 @@ impl<W: std::io::Write> ser::SerializeStructVariant for Compound<'_, W> {
     fn end(self) -> Result<()> {
         self.end_compound()
     }
+}
+
+// ── Commentable helpers ─────────────────────────────────────────
+
+/// Serialize a value (expected to be `Option<String>`) and capture it.
+fn capture_option_string<T: ?Sized + Serialize>(value: &T) -> Option<String> {
+    use serde::ser::Impossible;
+
+    struct Capturer;
+
+    impl serde::Serializer for Capturer {
+        type Ok = Option<String>;
+        type Error = Error;
+        type SerializeSeq = Impossible<Self::Ok, Self::Error>;
+        type SerializeTuple = Impossible<Self::Ok, Self::Error>;
+        type SerializeTupleStruct = Impossible<Self::Ok, Self::Error>;
+        type SerializeTupleVariant = Impossible<Self::Ok, Self::Error>;
+        type SerializeMap = Impossible<Self::Ok, Self::Error>;
+        type SerializeStruct = Impossible<Self::Ok, Self::Error>;
+        type SerializeStructVariant = Impossible<Self::Ok, Self::Error>;
+
+        fn serialize_none(self) -> Result<Self::Ok> {
+            Ok(None)
+        }
+
+        fn serialize_some<V: ?Sized + Serialize>(self, value: &V) -> Result<Self::Ok> {
+            value.serialize(self)
+        }
+
+        fn serialize_str(self, v: &str) -> Result<Self::Ok> {
+            Ok(Some(v.to_string()))
+        }
+
+        fn serialize_unit(self) -> Result<Self::Ok> {
+            Ok(None)
+        }
+
+        fn serialize_bool(self, _: bool) -> Result<Self::Ok> {
+            Ok(None)
+        }
+        fn serialize_i8(self, _: i8) -> Result<Self::Ok> {
+            Ok(None)
+        }
+        fn serialize_i16(self, _: i16) -> Result<Self::Ok> {
+            Ok(None)
+        }
+        fn serialize_i32(self, _: i32) -> Result<Self::Ok> {
+            Ok(None)
+        }
+        fn serialize_i64(self, _: i64) -> Result<Self::Ok> {
+            Ok(None)
+        }
+        fn serialize_u8(self, _: u8) -> Result<Self::Ok> {
+            Ok(None)
+        }
+        fn serialize_u16(self, _: u16) -> Result<Self::Ok> {
+            Ok(None)
+        }
+        fn serialize_u32(self, _: u32) -> Result<Self::Ok> {
+            Ok(None)
+        }
+        fn serialize_u64(self, _: u64) -> Result<Self::Ok> {
+            Ok(None)
+        }
+        fn serialize_f32(self, _: f32) -> Result<Self::Ok> {
+            Ok(None)
+        }
+        fn serialize_f64(self, _: f64) -> Result<Self::Ok> {
+            Ok(None)
+        }
+        fn serialize_char(self, _: char) -> Result<Self::Ok> {
+            Ok(None)
+        }
+        fn serialize_bytes(self, _: &[u8]) -> Result<Self::Ok> {
+            Ok(None)
+        }
+        fn serialize_unit_struct(self, _: &'static str) -> Result<Self::Ok> {
+            Ok(None)
+        }
+        fn serialize_unit_variant(
+            self,
+            _: &'static str,
+            _: u32,
+            _: &'static str,
+        ) -> Result<Self::Ok> {
+            Ok(None)
+        }
+        fn serialize_newtype_struct<V: ?Sized + Serialize>(
+            self,
+            _: &'static str,
+            _: &V,
+        ) -> Result<Self::Ok> {
+            Ok(None)
+        }
+        fn serialize_newtype_variant<V: ?Sized + Serialize>(
+            self,
+            _: &'static str,
+            _: u32,
+            _: &'static str,
+            _: &V,
+        ) -> Result<Self::Ok> {
+            Ok(None)
+        }
+        fn serialize_seq(self, _: Option<usize>) -> Result<Self::SerializeSeq> {
+            Err(Error::Message("unexpected".into()))
+        }
+        fn serialize_tuple(self, _: usize) -> Result<Self::SerializeTuple> {
+            Err(Error::Message("unexpected".into()))
+        }
+        fn serialize_tuple_struct(
+            self,
+            _: &'static str,
+            _: usize,
+        ) -> Result<Self::SerializeTupleStruct> {
+            Err(Error::Message("unexpected".into()))
+        }
+        fn serialize_tuple_variant(
+            self,
+            _: &'static str,
+            _: u32,
+            _: &'static str,
+            _: usize,
+        ) -> Result<Self::SerializeTupleVariant> {
+            Err(Error::Message("unexpected".into()))
+        }
+        fn serialize_map(self, _: Option<usize>) -> Result<Self::SerializeMap> {
+            Err(Error::Message("unexpected".into()))
+        }
+        fn serialize_struct(self, _: &'static str, _: usize) -> Result<Self::SerializeStruct> {
+            Err(Error::Message("unexpected".into()))
+        }
+        fn serialize_struct_variant(
+            self,
+            _: &'static str,
+            _: u32,
+            _: &'static str,
+            _: usize,
+        ) -> Result<Self::SerializeStructVariant> {
+            Err(Error::Message("unexpected".into()))
+        }
+    }
+
+    value.serialize(Capturer).unwrap_or(None)
 }
 
 // ── String quoting helpers ──────────────────────────────────────

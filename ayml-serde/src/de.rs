@@ -60,6 +60,9 @@ pub(crate) struct Deserializer<R> {
     /// Set to true when we're reading a mapping key, to prevent
     /// `deserialize_any` from re-detecting the colon as a new mapping.
     reading_key: bool,
+    /// Buffered top comment (lines preceding a value), captured during
+    /// whitespace/comment skipping for `Commentable<T>` support.
+    pending_top_comment: Option<String>,
 }
 
 impl<'a> Deserializer<StrRead<'a>> {
@@ -69,6 +72,7 @@ impl<'a> Deserializer<StrRead<'a>> {
             ctx: Context::Block,
             scratch: Vec::new(),
             reading_key: false,
+            pending_top_comment: None,
         }
     }
 }
@@ -80,6 +84,7 @@ impl<R: std::io::Read> Deserializer<IoRead<R>> {
             ctx: Context::Block,
             scratch: Vec::new(),
             reading_key: false,
+            pending_top_comment: None,
         }
     }
 }
@@ -195,18 +200,47 @@ impl<'de, R: Read<'de>> Deserializer<R> {
     }
 
     fn skip_whitespace_and_comments(&mut self) -> Result<()> {
+        let mut seen_comment = false;
         loop {
             match self.peek()? {
                 Some(' ' | '\t' | '\n' | '\r') => {
                     self.advance()?;
                 }
                 Some('#') => {
-                    self.rest_of_line()?;
-                    self.eat_break()?;
+                    if !seen_comment {
+                        self.pending_top_comment = None;
+                        seen_comment = true;
+                    }
+                    self.capture_comment_line()?;
                 }
                 _ => break,
             }
         }
+        Ok(())
+    }
+
+    /// Consume a `# ...` comment line including the trailing break,
+    /// appending the comment text to `pending_top_comment`.
+    fn capture_comment_line(&mut self) -> Result<()> {
+        self.advance()?; // skip '#'
+        // Skip optional space after '#'
+        if self.peek()? == Some(' ') {
+            self.advance()?;
+        }
+        let start = self.offset();
+        self.rest_of_line()?;
+        let end = self.offset();
+        let text = &self.read.input()[start..end];
+        match &mut self.pending_top_comment {
+            Some(buf) => {
+                buf.push('\n');
+                buf.push_str(text);
+            }
+            None => {
+                self.pending_top_comment = Some(text.to_string());
+            }
+        }
+        self.eat_break()?;
         Ok(())
     }
 
@@ -301,9 +335,7 @@ impl<'de, R: Read<'de>> Deserializer<R> {
             let input = self.read.input();
             if off < input.len() && input.as_bytes()[off] == b'#' {
                 self.set_offset(off);
-                self.advance()?; // skip '#'
-                self.rest_of_line()?;
-                self.eat_break()?;
+                self.capture_comment_line()?;
                 continue;
             }
             if self.offset() == saved {
@@ -512,6 +544,39 @@ impl<'de, R: Read<'de>> Deserializer<R> {
             visitor.visit_f64(i as f64)
         } else {
             Err(self.error(&format!("expected float, got `{text}`")))
+        }
+    }
+
+    /// Handle `Commentable<T>` deserialization: present a virtual map with
+    /// `__top_comment__`, `__value__`, and `__inline_comment__` entries.
+    fn deserialize_commentable<V: de::Visitor<'de>>(&mut self, visitor: V) -> Result<V::Value> {
+        // Skip whitespace/comments so that a top comment indented under the
+        // key (e.g. after "key:\n  # comment\n  value") is captured before
+        // we take the pending comment.
+        self.skip_whitespace_and_comments()?;
+        let top_comment = self.pending_top_comment.take();
+        visitor.visit_map(CommentableAccess {
+            de: self,
+            top_comment,
+            state: CommentableState::TopComment,
+        })
+    }
+
+    /// After value deserialization, try to capture a trailing inline comment.
+    fn capture_inline_comment(&mut self) -> Result<Option<String>> {
+        self.skip_inline_whitespace()?;
+        if self.peek()? == Some('#') {
+            self.advance()?; // skip '#'
+            if self.peek()? == Some(' ') {
+                self.advance()?; // skip space
+            }
+            let start = self.offset();
+            self.rest_of_line()?;
+            let end = self.offset();
+            let text = self.read.input()[start..end].to_string();
+            Ok(Some(text))
+        } else {
+            Ok(None)
         }
     }
 }
@@ -801,10 +866,13 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
 
     fn deserialize_struct<V: Visitor<'de>>(
         self,
-        _name: &'static str,
+        name: &'static str,
         _fields: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value> {
+        if name == crate::commentable::COMMENTABLE_STRUCT {
+            return self.deserialize_commentable(visitor);
+        }
         self.deserialize_map(visitor)
     }
 
@@ -933,6 +1001,7 @@ impl<'a, 'de, R: Read<'de>> de::SeqAccess<'de> for SeqAccess<'a, R> {
                 // leaving us at the start of a new line. Save position so we
                 // can restore if we mistakenly consume indentation as inline
                 // whitespace.
+                self.de.pending_top_comment = None;
                 let saved = self.de.offset();
                 if !self.de.is_break_or_eof()? {
                     self.de.skip_inline_whitespace()?;
@@ -1039,6 +1108,7 @@ impl<'a, 'de, R: Read<'de>> de::MapAccess<'de> for MapAccess<'a, R> {
                     // Between entries: finish current line, move to next.
                     // A nested block value may have already consumed the
                     // newline, leaving us at the start of a new line.
+                    self.de.pending_top_comment = None;
                     let saved = self.de.offset();
                     if !self.de.is_break_or_eof()? {
                         self.de.skip_inline_whitespace()?;
@@ -1092,6 +1162,90 @@ impl<'a, 'de, R: Read<'de>> de::MapAccess<'de> for MapAccess<'a, R> {
         // For flow mappings, ctx is already set to Flow by next_key_seed.
         // It will be restored to prev_ctx when next_key_seed detects `}`.
         seed.deserialize(&mut *self.de)
+    }
+}
+
+// ── CommentableAccess (virtual MapAccess for Commentable<T>) ──────
+
+enum CommentableState {
+    TopComment,
+    Value,
+    InlineComment,
+    Done,
+}
+
+struct CommentableAccess<'a, R> {
+    de: &'a mut Deserializer<R>,
+    top_comment: Option<String>,
+    state: CommentableState,
+}
+
+impl<'a, 'de, R: Read<'de>> de::MapAccess<'de> for CommentableAccess<'a, R> {
+    type Error = Error;
+
+    fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>
+    where
+        K: de::DeserializeSeed<'de>,
+    {
+        use crate::commentable::*;
+        let key = match self.state {
+            CommentableState::TopComment => FIELD_TOP_COMMENT,
+            CommentableState::Value => FIELD_VALUE,
+            CommentableState::InlineComment => FIELD_INLINE_COMMENT,
+            CommentableState::Done => return Ok(None),
+        };
+        seed.deserialize(de::value::BorrowedStrDeserializer::new(key))
+            .map(Some)
+    }
+
+    fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value>
+    where
+        V: de::DeserializeSeed<'de>,
+    {
+        match self.state {
+            CommentableState::TopComment => {
+                self.state = CommentableState::Value;
+                let comment = self.top_comment.take();
+                seed.deserialize(OptionStringDeserializer(comment))
+            }
+            CommentableState::Value => {
+                self.state = CommentableState::InlineComment;
+                seed.deserialize(&mut *self.de)
+            }
+            CommentableState::InlineComment => {
+                self.state = CommentableState::Done;
+                let comment = self.de.capture_inline_comment()?;
+                seed.deserialize(OptionStringDeserializer(comment))
+            }
+            CommentableState::Done => Err(self.de.error("CommentableAccess: unexpected state")),
+        }
+    }
+}
+
+/// Mini deserializer that presents an `Option<String>` to serde.
+struct OptionStringDeserializer(Option<String>);
+
+impl<'de> de::Deserializer<'de> for OptionStringDeserializer {
+    type Error = Error;
+
+    fn deserialize_any<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
+        match self.0 {
+            Some(s) => visitor.visit_some(de::value::StringDeserializer::new(s)),
+            None => visitor.visit_none(),
+        }
+    }
+
+    fn deserialize_option<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
+        match self.0 {
+            Some(s) => visitor.visit_some(de::value::StringDeserializer::new(s)),
+            None => visitor.visit_none(),
+        }
+    }
+
+    serde::forward_to_deserialize_any! {
+        bool i8 i16 i32 i64 u8 u16 u32 u64 f32 f64 char str string
+        bytes byte_buf unit unit_struct newtype_struct seq tuple
+        tuple_struct map struct enum identifier ignored_any
     }
 }
 
