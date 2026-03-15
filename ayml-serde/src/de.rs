@@ -47,6 +47,9 @@ enum Context {
 
 // ── Deserializer ─────────────────────────────────────────────────
 
+/// Maximum nesting depth for collections to prevent stack overflow / OOM.
+const MAX_DEPTH: usize = 128;
+
 pub(crate) struct Deserializer<R> {
     read: R,
     /// Current parsing context — flow collections set this to Flow so
@@ -63,6 +66,8 @@ pub(crate) struct Deserializer<R> {
     /// Buffered top comment (lines preceding a value), captured during
     /// whitespace/comment skipping for `Commented<T>` support.
     pending_top_comment: Option<String>,
+    /// Current nesting depth (sequences + mappings).
+    depth: usize,
 }
 
 impl<'a> Deserializer<StrRead<'a>> {
@@ -73,6 +78,7 @@ impl<'a> Deserializer<StrRead<'a>> {
             scratch: Vec::new(),
             reading_key: false,
             pending_top_comment: None,
+            depth: 0,
         }
     }
 }
@@ -85,6 +91,7 @@ impl<R: std::io::Read> Deserializer<IoRead<R>> {
             scratch: Vec::new(),
             reading_key: false,
             pending_top_comment: None,
+            depth: 0,
         }
     }
 }
@@ -176,6 +183,21 @@ impl<'de, R: Read<'de>> Deserializer<R> {
 
     fn set_offset(&mut self, offset: usize) {
         self.read.set_offset(offset);
+    }
+
+    // ── Depth tracking ────────────────────────────────────────────
+
+    fn enter_collection(&mut self) -> Result<()> {
+        self.depth += 1;
+        if self.depth > MAX_DEPTH {
+            Err(self.error("nesting depth limit exceeded"))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn leave_collection(&mut self) {
+        self.depth -= 1;
     }
 
     // ── Error helpers ────────────────────────────────────────────
@@ -598,7 +620,11 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
                     if self.is_mapping_value_indicator()? {
                         self.set_offset(start);
                         let indent = self.current_indent();
-                        return visitor.visit_map(MapAccess::new(self, MapStyle::Block(indent)));
+                        self.enter_collection()?;
+                        let value =
+                            visitor.visit_map(MapAccess::new(self, MapStyle::Block(indent)));
+                        self.leave_collection();
+                        return value;
                     }
                 }
                 visitor.visit_string(s)
@@ -606,7 +632,10 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
             Some('[') => {
                 self.advance()?;
                 let prev_ctx = self.ctx;
-                let value = visitor.visit_seq(SeqAccess::new(self, SeqStyle::Flow))?;
+                self.enter_collection()?;
+                let value = visitor.visit_seq(SeqAccess::new(self, SeqStyle::Flow));
+                self.leave_collection();
+                let value = value?;
                 self.skip_whitespace_and_comments()?;
                 if !self.eat(']')? {
                     return Err(self.error("expected `]` to close sequence"));
@@ -617,7 +646,10 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
             Some('{') => {
                 self.advance()?;
                 let prev_ctx = self.ctx;
-                let value = visitor.visit_map(MapAccess::new(self, MapStyle::Flow))?;
+                self.enter_collection()?;
+                let value = visitor.visit_map(MapAccess::new(self, MapStyle::Flow));
+                self.leave_collection();
+                let value = value?;
                 self.skip_whitespace_and_comments()?;
                 if !self.eat('}')? {
                     return Err(self.error("expected `}` to close mapping"));
@@ -627,7 +659,10 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
             }
             Some('-') if self.peek_nth(1)? == Some(' ') => {
                 let indent = self.current_indent();
-                visitor.visit_seq(SeqAccess::new(self, SeqStyle::Block(indent)))
+                self.enter_collection()?;
+                let value = visitor.visit_seq(SeqAccess::new(self, SeqStyle::Block(indent)));
+                self.leave_collection();
+                value
             }
             Some(_) => {
                 // Bare scalar — but check if it's a mapping key first
@@ -639,7 +674,11 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
                     if self.is_mapping_value_indicator()? {
                         self.set_offset(start);
                         let indent = self.current_indent();
-                        return visitor.visit_map(MapAccess::new(self, MapStyle::Block(indent)));
+                        self.enter_collection()?;
+                        let value =
+                            visitor.visit_map(MapAccess::new(self, MapStyle::Block(indent)));
+                        self.leave_collection();
+                        return value;
                     }
                 }
                 // Resolve scalar type
@@ -812,11 +851,14 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
 
     fn deserialize_seq<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         self.skip_whitespace_and_comments()?;
+        self.enter_collection()?;
         match self.peek()? {
             Some('[') => {
                 self.advance()?;
                 let prev_ctx = self.ctx;
-                let value = visitor.visit_seq(SeqAccess::new(self, SeqStyle::Flow))?;
+                let value = visitor.visit_seq(SeqAccess::new(self, SeqStyle::Flow));
+                self.leave_collection();
+                let value = value?;
                 self.skip_whitespace_and_comments()?;
                 if !self.eat(']')? {
                     return Err(self.error("expected `]` to close sequence"));
@@ -826,9 +868,14 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
             }
             Some('-') if self.peek_nth(1)? == Some(' ') => {
                 let indent = self.current_indent();
-                visitor.visit_seq(SeqAccess::new(self, SeqStyle::Block(indent)))
+                let value = visitor.visit_seq(SeqAccess::new(self, SeqStyle::Block(indent)));
+                self.leave_collection();
+                value
             }
-            _ => Err(self.error("expected sequence (`[` or `- `)")),
+            _ => {
+                self.leave_collection();
+                Err(self.error("expected sequence (`[` or `- `)"))
+            }
         }
     }
 
@@ -847,11 +894,14 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
 
     fn deserialize_map<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         self.skip_whitespace_and_comments()?;
+        self.enter_collection()?;
         match self.peek()? {
             Some('{') => {
                 self.advance()?;
                 let prev_ctx = self.ctx;
-                let value = visitor.visit_map(MapAccess::new(self, MapStyle::Flow))?;
+                let value = visitor.visit_map(MapAccess::new(self, MapStyle::Flow));
+                self.leave_collection();
+                let value = value?;
                 self.skip_whitespace_and_comments()?;
                 if !self.eat('}')? {
                     return Err(self.error("expected `}` to close mapping"));
@@ -861,7 +911,9 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
             }
             _ => {
                 let indent = self.current_indent();
-                visitor.visit_map(MapAccess::new(self, MapStyle::Block(indent)))
+                let value = visitor.visit_map(MapAccess::new(self, MapStyle::Block(indent)));
+                self.leave_collection();
+                value
             }
         }
     }
@@ -2021,5 +2073,33 @@ mod tests {
             Red,
         }
         assert_eq!(from_str::<Color>(r#""Red""#).unwrap(), Color::Red);
+    }
+
+    #[test]
+    fn test_depth_limit_flow_seq() {
+        let input = "[".repeat(MAX_DEPTH + 1);
+        let err = from_str::<crate::Value>(&input).unwrap_err();
+        assert!(
+            err.to_string().contains("nesting depth limit exceeded"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn test_depth_limit_flow_map() {
+        // {a: {a: {a: ... }}}
+        let input = "{a: ".repeat(MAX_DEPTH + 1) + &"}".repeat(MAX_DEPTH + 1);
+        let err = from_str::<crate::Value>(&input).unwrap_err();
+        assert!(
+            err.to_string().contains("nesting depth limit exceeded"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn test_depth_within_limit() {
+        // 3 levels of nesting should be fine
+        let val: crate::Value = from_str("[[1, 2], [3, 4]]").unwrap();
+        assert!(matches!(val, crate::Value::Seq(_)));
     }
 }
