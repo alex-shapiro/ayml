@@ -72,29 +72,35 @@ pub(crate) struct IoRead<R> {
     done: bool,
     /// Leftover bytes from incomplete UTF-8 sequence at chunk boundary.
     pending: Vec<u8>,
+    /// Maximum buffer size. Prevents OOM from unbounded input.
+    max_buf: usize,
 }
+
+/// Default maximum buffer size for `IoRead` (256 MiB).
+pub(crate) const DEFAULT_MAX_IO_BUF: usize = 256 * 1024 * 1024;
 
 impl<R: std::io::Read> IoRead<R> {
     pub fn new(reader: R) -> Self {
+        Self::with_max_buf(reader, DEFAULT_MAX_IO_BUF)
+    }
+
+    pub fn with_max_buf(reader: R, max_buf: usize) -> Self {
         Self {
             reader,
             buf: String::new(),
             offset: 0,
             done: false,
             pending: Vec::new(),
+            max_buf,
         }
     }
 }
 
-/// Maximum buffer size for `IoRead` (256 MiB). Prevents OOM from
-/// unbounded input when reading from an `io::Read` source.
-const MAX_IO_BUF: usize = 256 * 1024 * 1024;
-
 impl<R: std::io::Read> Read<'_> for IoRead<R> {
     fn fill_to(&mut self, pos: usize) -> Result<bool> {
-        if pos > MAX_IO_BUF {
+        if self.buf.len() > self.max_buf || pos > self.max_buf {
             return Err(Error::Message(format!(
-                "input exceeds maximum size ({MAX_IO_BUF} bytes)"
+                "input exceeds maximum size ({} bytes)", self.max_buf
             )));
         }
         while self.buf.len() < pos && !self.done {

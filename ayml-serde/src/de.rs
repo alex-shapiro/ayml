@@ -53,6 +53,25 @@ pub fn from_reader<R: std::io::Read, T: DeserializeOwned>(rdr: R) -> Result<T> {
     Ok(value)
 }
 
+/// Like [`from_reader`], but with a custom maximum input buffer size.
+///
+/// The default limit is 256 MiB. Pass a smaller value to reject input
+/// earlier, or a larger value to allow bigger documents.
+///
+/// # Errors
+///
+/// Returns an error if the input exceeds `max_buf` bytes, in addition
+/// to the same errors as [`from_reader`].
+pub fn from_reader_with_max_buf<R: std::io::Read, T: DeserializeOwned>(
+    rdr: R,
+    max_buf: usize,
+) -> Result<T> {
+    let mut de = Deserializer::from_reader_with_max_buf(rdr, max_buf);
+    let value = T::deserialize(&mut de)?;
+    de.end()?;
+    Ok(value)
+}
+
 // ── Parsing context ──────────────────────────────────────────────
 
 /// Block vs flow parsing context, mirroring ayml-core's grammar.
@@ -99,6 +118,17 @@ impl<R: std::io::Read> Deserializer<IoRead<R>> {
     fn from_reader(rdr: R) -> Self {
         Self {
             read: IoRead::new(rdr),
+            ctx: Context::Block,
+
+            reading_key: false,
+            pending_top_comment: None,
+            depth: 0,
+        }
+    }
+
+    fn from_reader_with_max_buf(rdr: R, max_buf: usize) -> Self {
+        Self {
+            read: IoRead::with_max_buf(rdr, max_buf),
             ctx: Context::Block,
 
             reading_key: false,
@@ -812,16 +842,23 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
             Some('"') => {
                 let start = self.offset();
                 let s = self.scan_quoted_string()?;
+                let after_key = self.offset();
                 // Check if this is a mapping key (but not if we're already reading a key,
                 // and not in flow context where maps use explicit `{}`).
                 if !self.reading_key && self.ctx == Context::Block {
                     self.skip_inline_whitespace()?;
                     if self.is_mapping_value_indicator()? {
-                        self.set_offset(start);
-                        let indent = self.current_indent();
+                        self.advance()?; // consume ':'
+                        self.skip_inline_whitespace()?;
+                        let indent = indent_at(self.read.input(), start);
+                        let raw = self.read.input()[start..after_key].to_string();
                         self.enter_collection()?;
-                        let value =
-                            visitor.visit_map(MapAccess::new(self, MapStyle::Block(indent)));
+                        let key = PrescannedKey { value: s, raw };
+                        let value = visitor.visit_map(MapAccess::with_prescanned_key(
+                            self,
+                            MapStyle::Block(indent),
+                            key,
+                        ));
                         self.leave_collection();
                         return value;
                     }
@@ -869,14 +906,21 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
                 // in flow context where maps use explicit `{}`).
                 let start = self.offset();
                 let text = self.scan_bare_string(self.ctx)?;
+                let after_key = self.offset();
                 if !self.reading_key && self.ctx == Context::Block {
                     self.skip_inline_whitespace()?;
                     if self.is_mapping_value_indicator()? {
-                        self.set_offset(start);
-                        let indent = self.current_indent();
+                        self.advance()?; // consume ':'
+                        self.skip_inline_whitespace()?;
+                        let indent = indent_at(self.read.input(), start);
+                        let raw = self.read.input()[start..after_key].to_string();
                         self.enter_collection()?;
-                        let value =
-                            visitor.visit_map(MapAccess::new(self, MapStyle::Block(indent)));
+                        let key = PrescannedKey { value: text, raw };
+                        let value = visitor.visit_map(MapAccess::with_prescanned_key(
+                            self,
+                            MapStyle::Block(indent),
+                            key,
+                        ));
                         self.leave_collection();
                         return value;
                     }
@@ -1147,6 +1191,7 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
             let result = visitor.visit_enum(EnumAccess {
                 de: self,
                 style: EnumStyle::Mapping,
+                prescanned_variant: None,
             });
             self.leave_collection();
             self.ctx = prev_ctx;
@@ -1160,24 +1205,26 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
             // Could be a unit variant (bare string) or block mapping (key: value).
             // Lookahead: scan the key, check for `: `.
             let start = self.offset();
-            let _text = self.scan_scalar_string(self.ctx)?;
+            let text = self.scan_scalar_string(self.ctx)?;
             self.skip_inline_whitespace()?;
             if self.is_mapping_value_indicator()? {
                 // Block mapping style: VariantName: value
-                self.set_offset(start);
+                self.advance()?; // consume ':'
+                self.skip_inline_whitespace()?;
                 self.enter_collection()?;
                 let value = visitor.visit_enum(EnumAccess {
                     de: self,
                     style: EnumStyle::Mapping,
+                    prescanned_variant: Some(text),
                 });
                 self.leave_collection();
                 value
             } else {
                 // Unit variant: just a bare string
-                self.set_offset(start);
                 visitor.visit_enum(EnumAccess {
                     de: self,
                     style: EnumStyle::Unit,
+                    prescanned_variant: Some(text),
                 })
             }
         }
@@ -1316,6 +1363,16 @@ struct MapAccess<'a, R> {
     style: MapStyle,
     first: bool,
     seen_keys: HashSet<String>,
+    /// Pre-scanned first key from `deserialize_any`, avoiding a rewind.
+    prescanned_first_key: Option<PrescannedKey>,
+}
+
+/// A key already scanned by `deserialize_any` before deciding this is a mapping.
+struct PrescannedKey {
+    /// The decoded key string (after unquoting/unescaping).
+    value: String,
+    /// The raw source text of the key (for duplicate/validation checks).
+    raw: String,
 }
 
 impl<'a, R> MapAccess<'a, R> {
@@ -1324,7 +1381,22 @@ impl<'a, R> MapAccess<'a, R> {
             de,
             style,
             first: true,
-            seen_keys: HashSet::default(),
+            seen_keys: HashSet::new(),
+            prescanned_first_key: None,
+        }
+    }
+
+    fn with_prescanned_key(
+        de: &'a mut Deserializer<R>,
+        style: MapStyle,
+        key: PrescannedKey,
+    ) -> Self {
+        Self {
+            de,
+            style,
+            first: true,
+            seen_keys: HashSet::new(),
+            prescanned_first_key: Some(key),
         }
     }
 }
@@ -1396,6 +1468,17 @@ impl<'de, R: Read<'de>> de::MapAccess<'de> for MapAccess<'_, R> {
                 let indent = *indent;
                 if self.first {
                     self.first = false;
+                    // If deserialize_any already scanned the first key, use it.
+                    if let Some(key) = self.prescanned_first_key.take() {
+                        self.validate_key(&key.raw)?;
+                        if !self.seen_keys.insert(key.raw) {
+                            return Err(self.de.error("duplicate key"));
+                        }
+                        let val = seed.deserialize(
+                            de::value::StringDeserializer::<Error>::new(key.value),
+                        )?;
+                        return Ok(Some(val));
+                    }
                     // Indent already consumed by deserialize_map/struct
                 } else {
                     // Between entries: finish current line, move to next.
@@ -1576,6 +1659,7 @@ enum EnumStyle {
 struct EnumAccess<'a, R> {
     de: &'a mut Deserializer<R>,
     style: EnumStyle,
+    prescanned_variant: Option<String>,
 }
 
 impl<'a, 'de, R: Read<'de>> de::EnumAccess<'de> for EnumAccess<'a, R> {
@@ -1588,17 +1672,27 @@ impl<'a, 'de, R: Read<'de>> de::EnumAccess<'de> for EnumAccess<'a, R> {
     {
         match self.style {
             EnumStyle::Unit => {
-                let variant = seed.deserialize(&mut *self.de)?;
+                let variant = if let Some(text) = self.prescanned_variant {
+                    seed.deserialize(de::value::StringDeserializer::<Error>::new(text))?
+                } else {
+                    seed.deserialize(&mut *self.de)?
+                };
                 Ok((variant, VariantAccess { de: self.de }))
             }
             EnumStyle::Mapping => {
-                // Read the variant name (key), then consume `:`
-                let variant = seed.deserialize(&mut *self.de)?;
-                self.de.skip_inline_whitespace()?;
-                if !self.de.eat(':')? {
-                    return Err(self.de.error("expected `:` after enum variant name"));
-                }
-                self.de.skip_inline_whitespace()?;
+                let variant = if let Some(text) = self.prescanned_variant {
+                    // Variant was already scanned and `:` consumed by deserialize_enum
+                    seed.deserialize(de::value::StringDeserializer::<Error>::new(text))?
+                } else {
+                    // Flow context: read the variant name (key), then consume `:`
+                    let variant = seed.deserialize(&mut *self.de)?;
+                    self.de.skip_inline_whitespace()?;
+                    if !self.de.eat(':')? {
+                        return Err(self.de.error("expected `:` after enum variant name"));
+                    }
+                    self.de.skip_inline_whitespace()?;
+                    variant
+                };
                 Ok((variant, VariantAccess { de: self.de }))
             }
         }
@@ -1795,6 +1889,18 @@ fn valid_exponent(exp: &str) -> bool {
         .or_else(|| exp.strip_prefix('-'))
         .unwrap_or(exp);
     !exp.is_empty() && exp.chars().all(|c| c.is_ascii_digit())
+}
+
+/// Compute the column indent of `offset` within `source` (number of bytes
+/// since the last newline or start of input).
+fn indent_at(source: &str, offset: usize) -> usize {
+    let bytes = source.as_bytes();
+    for i in (0..offset).rev() {
+        if bytes[i] == b'\n' || bytes[i] == b'\r' {
+            return offset - i - 1;
+        }
+    }
+    offset
 }
 
 fn line_col(source: &str, offset: usize) -> (usize, usize) {

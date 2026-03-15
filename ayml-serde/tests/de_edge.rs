@@ -510,16 +510,17 @@ fn de_depth_limit_nested_enums() {
 
 #[test]
 fn de_io_read_buffer_limit() {
-    // Simulate a reader that would produce very large input
+    // Simulate a reader that produces infinite input. Use a small max_buf
+    // (8 KiB) so the limit is hit almost instantly rather than requiring
+    // 256 MiB of iteration.
     struct InfiniteReader;
     impl std::io::Read for InfiniteReader {
         fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-            // Fill buffer with spaces (valid AYML whitespace, forcing fill_to to keep reading)
             buf.fill(b' ');
             Ok(buf.len())
         }
     }
-    let err = ayml_serde::from_reader::<_, i32>(InfiniteReader);
+    let err = ayml_serde::from_reader_with_max_buf::<_, i32>(InfiniteReader, 8 * 1024);
     assert!(err.is_err());
     let msg = err.unwrap_err().to_string();
     assert!(

@@ -13,5 +13,5 @@ pub use commented_value::{CommentedValue, CommentedValueKind};
 pub use error::{Error, Result};
 pub use value::Value;
 
-pub use de::{from_reader, from_slice, from_str};
+pub use de::{from_reader, from_reader_with_max_buf, from_slice, from_str};
 pub use ser::{to_string, to_vec, to_writer};
