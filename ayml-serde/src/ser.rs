@@ -481,7 +481,7 @@ impl<W: std::io::Write> Compound<'_, W> {
             }
             FIELD_VALUE => {
                 // Emit top comment if present
-                if let Some(ref comment) = self.top_comment {
+                if let Some(comment) = self.top_comment.as_ref().filter(|c| !c.is_empty()) {
                     if self.ser.after_key {
                         self.ser.write_str("\n")?;
                         self.ser.after_key = false;
@@ -501,8 +501,13 @@ impl<W: std::io::Write> Compound<'_, W> {
                 }
                 // Serialize the actual value
                 value.serialize(&mut *self.ser)?;
+                // Clear compact in case the value was a scalar (collections
+                // consume it in write_key_prefix, but scalars don't).
+                self.ser.compact = false;
                 // Emit inline comment if present
-                if let Some(ref comment) = self.inline_comment {
+                if let Some(ref comment) = self.inline_comment
+                    && !comment.is_empty()
+                {
                     self.ser.write_str(" # ")?;
                     self.ser.write_str(comment)?;
                 }

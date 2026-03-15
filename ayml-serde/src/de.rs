@@ -555,10 +555,12 @@ impl<'de, R: Read<'de>> Deserializer<R> {
         // we take the pending comment.
         self.skip_whitespace_and_comments()?;
         let top_comment = self.pending_top_comment.take();
+        let offset = self.offset();
         visitor.visit_map(CommentedAccess {
             de: self,
             top_comment,
             state: CommentedState::TopComment,
+            value_start: offset,
         })
     }
 
@@ -1178,6 +1180,8 @@ struct CommentedAccess<'a, R> {
     de: &'a mut Deserializer<R>,
     top_comment: Option<String>,
     state: CommentedState,
+    /// Offset before value deserialization; used to detect line crossings.
+    value_start: usize,
 }
 
 impl<'a, 'de, R: Read<'de>> de::MapAccess<'de> for CommentedAccess<'a, R> {
@@ -1210,11 +1214,22 @@ impl<'a, 'de, R: Read<'de>> de::MapAccess<'de> for CommentedAccess<'a, R> {
             }
             CommentedState::Value => {
                 self.state = CommentedState::InlineComment;
+                self.value_start = self.de.offset();
                 seed.deserialize(&mut *self.de)
             }
             CommentedState::InlineComment => {
                 self.state = CommentedState::Done;
-                let comment = self.de.capture_inline_comment()?;
+                // Only capture an inline comment if the value didn't cross
+                // a line boundary. Block collections consume newlines, leaving
+                // the cursor at the next line's indentation — calling
+                // capture_inline_comment would eat those indent spaces.
+                let crossed_line =
+                    self.de.read.input()[self.value_start..self.de.offset()].contains('\n');
+                let comment = if crossed_line {
+                    None
+                } else {
+                    self.de.capture_inline_comment()?
+                };
                 seed.deserialize(OptionStringDeserializer(comment))
             }
             CommentedState::Done => Err(self.de.error("CommentedAccess: unexpected state")),
