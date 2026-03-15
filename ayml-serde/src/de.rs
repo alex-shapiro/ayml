@@ -928,15 +928,23 @@ impl<'a, 'de, R: Read<'de>> de::SeqAccess<'de> for SeqAccess<'a, R> {
                     return seed.deserialize(&mut *self.de).map(Some);
                 }
 
-                // Between entries: finish current line, move to next
+                // Between entries: finish current line, move to next.
+                // A nested block value may have already consumed the newline,
+                // leaving us at the start of a new line. Save position so we
+                // can restore if we mistakenly consume indentation as inline
+                // whitespace.
+                let saved = self.de.offset();
                 if !self.de.is_break_or_eof()? {
                     self.de.skip_inline_whitespace()?;
                     if self.de.peek()? == Some('#') {
                         self.de.rest_of_line()?;
                     }
                 }
-                if !self.de.is_eof()? {
-                    self.de.eat_break()?;
+                if !self.de.is_eof()? && !self.de.eat_break()? {
+                    // No break found — newline was already consumed by
+                    // a nested value. Restore position so indentation
+                    // is preserved for count_spaces below.
+                    self.de.set_offset(saved);
                 }
                 self.de.skip_block_gaps()?;
 
@@ -1028,15 +1036,20 @@ impl<'a, 'de, R: Read<'de>> de::MapAccess<'de> for MapAccess<'a, R> {
                     self.first = false;
                     // Indent already consumed by deserialize_map/struct
                 } else {
-                    // Between entries: finish current line, move to next
+                    // Between entries: finish current line, move to next.
+                    // A nested block value may have already consumed the
+                    // newline, leaving us at the start of a new line.
+                    let saved = self.de.offset();
                     if !self.de.is_break_or_eof()? {
                         self.de.skip_inline_whitespace()?;
                         if self.de.peek()? == Some('#') {
                             self.de.rest_of_line()?;
                         }
                     }
-                    if !self.de.is_eof()? {
-                        self.de.eat_break()?;
+                    if !self.de.is_eof()? && !self.de.eat_break()? {
+                        // No break found — newline was already consumed
+                        // by a nested value. Restore position.
+                        self.de.set_offset(saved);
                     }
                     self.de.skip_block_gaps()?;
 

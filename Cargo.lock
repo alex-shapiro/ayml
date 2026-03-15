@@ -35,6 +35,7 @@ version = "0.1.0"
 dependencies = [
  "ayml-core",
  "itoa",
+ "proptest",
  "ryu",
  "serde",
  "serde_bytes",

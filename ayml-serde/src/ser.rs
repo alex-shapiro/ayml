@@ -570,6 +570,11 @@ fn needs_quoting(s: &str) -> bool {
         }
     }
 
+    // Trailing `:` would be parsed as a mapping key
+    if bytes.last() == Some(&b':') {
+        return true;
+    }
+
     // Trailing whitespace would be stripped
     if bytes.last().is_some_and(|&b| b == b' ' || b == b'\t') {
         return true;
