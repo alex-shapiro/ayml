@@ -27,7 +27,7 @@ pub type CommentedValue = Commented<CommentedValueKind>;
 /// magic struct name detection.
 #[derive(Debug, Clone)]
 pub enum CommentedValueKind {
-    Null(()),
+    Null,
     Bool(bool),
     Int(i64),
     Float(f64),
@@ -41,7 +41,7 @@ pub enum CommentedValueKind {
 impl Serialize for CommentedValueKind {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
-            Self::Null(()) => serializer.serialize_unit(),
+            Self::Null => serializer.serialize_unit(),
             Self::Bool(b) => serializer.serialize_bool(*b),
             Self::Int(i) => serializer.serialize_i64(*i),
             Self::Float(f) => serializer.serialize_f64(*f),
@@ -84,7 +84,7 @@ impl<'de> Visitor<'de> for CommentedValueKindVisitor {
     }
 
     fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
-        Ok(CommentedValueKind::Null(()))
+        Ok(CommentedValueKind::Null)
     }
 
     fn visit_bool<E: de::Error>(self, v: bool) -> Result<Self::Value, E> {
@@ -96,7 +96,7 @@ impl<'de> Visitor<'de> for CommentedValueKindVisitor {
     }
 
     fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> {
-        Ok(CommentedValueKind::Int(v as i64))
+        Ok(CommentedValueKind::Int(v.cast_signed()))
     }
 
     fn visit_f64<E: de::Error>(self, v: f64) -> Result<Self::Value, E> {
@@ -133,7 +133,7 @@ impl<'de> Visitor<'de> for CommentedValueKindVisitor {
 impl PartialEq for CommentedValueKind {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Null(()), Self::Null(())) => true,
+            (Self::Null, Self::Null) => true,
             (Self::Bool(a), Self::Bool(b)) => a == b,
             (Self::Int(a), Self::Int(b)) => a == b,
             (Self::Float(a), Self::Float(b)) => (a.is_nan() && b.is_nan()) || a == b,
@@ -152,7 +152,7 @@ impl Eq for CommentedValueKind {}
 impl fmt::Display for CommentedValueKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Null(()) => write!(f, "null"),
+            Self::Null => write!(f, "null"),
             Self::Bool(b) => write!(f, "{b}"),
             Self::Int(i) => write!(f, "{i}"),
             Self::Float(v) => {

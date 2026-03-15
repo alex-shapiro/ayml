@@ -18,7 +18,7 @@ use std::fmt;
 #[serde(untagged)]
 pub enum Value {
     /// AYML `null`.
-    Null(()),
+    Null,
     /// AYML `true` or `false`.
     Bool(bool),
     /// AYML integer (64-bit signed).
@@ -36,7 +36,7 @@ pub enum Value {
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Value::Null(()), Value::Null(())) => true,
+            (Value::Null, Value::Null) => true,
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::Int(a), Value::Int(b)) => a == b,
             (Value::Float(a), Value::Float(b)) => (a.is_nan() && b.is_nan()) || a == b,
@@ -53,7 +53,7 @@ impl Eq for Value {}
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Value::Null(()) => write!(f, "null"),
+            Value::Null => write!(f, "null"),
             Value::Bool(b) => write!(f, "{b}"),
             Value::Int(i) => write!(f, "{i}"),
             Value::Float(v) => {

@@ -66,7 +66,7 @@ fn arb_commented_value_inner(
     inside_seq: bool,
 ) -> impl Strategy<Value = CommentedValue> {
     let leaf = prop_oneof![
-        Just(CommentedValueKind::Null(())),
+        Just(CommentedValueKind::Null),
         any::<bool>().prop_map(CommentedValueKind::Bool),
         any::<i64>().prop_map(CommentedValueKind::Int),
         (-1e15_f64..1e15_f64)

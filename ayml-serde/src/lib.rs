@@ -1,4 +1,6 @@
-mod commentable;
+#![warn(clippy::all, clippy::pedantic)]
+
+mod commented;
 mod commented_value;
 pub mod de;
 mod error;
@@ -6,7 +8,7 @@ mod read;
 pub mod ser;
 mod value;
 
-pub use commentable::Commented;
+pub use commented::Commented;
 pub use commented_value::{CommentedValue, CommentedValueKind};
 pub use error::{Error, Result};
 pub use value::Value;

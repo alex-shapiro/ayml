@@ -54,7 +54,7 @@ fn arb_scalar_string() -> impl Strategy<Value = String> {
 /// Generate a random Value tree with bounded depth.
 fn arb_value(depth: u32) -> impl Strategy<Value = Value> {
     let leaf = prop_oneof![
-        Just(Value::Null(())),
+        Just(Value::Null),
         any::<bool>().prop_map(Value::Bool),
         prop_oneof![any::<i64>(), Just(i64::MIN), Just(i64::MAX), Just(0_i64),]
             .prop_map(Value::Int),

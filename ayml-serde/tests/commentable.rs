@@ -333,7 +333,7 @@ fn ser_commented_seq_as_toplevel_map_value() {
         CommentedValue {
             top_comment: Some("a".into()),
             inline_comment: None,
-            value: CommentedValueKind::Seq(vec![Commented::new(CommentedValueKind::Null(()))]),
+            value: CommentedValueKind::Seq(vec![Commented::new(CommentedValueKind::Null)]),
         },
     );
     let v = Commented::new(CommentedValueKind::Map(m));
@@ -351,7 +351,7 @@ fn ser_commented_value_seq_in_map() {
         CommentedValue {
             top_comment: Some("?".into()),
             inline_comment: None,
-            value: CommentedValueKind::Seq(vec![Commented::new(CommentedValueKind::Null(()))]),
+            value: CommentedValueKind::Seq(vec![Commented::new(CommentedValueKind::Null)]),
         },
     );
     let mut outer = HashMap::new();

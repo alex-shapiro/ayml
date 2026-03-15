@@ -4,6 +4,10 @@ use serde::ser;
 use crate::error::{Error, Result};
 
 /// Serialize a `T` to an AYML string.
+///
+/// # Errors
+///
+/// Returns an error if serialization fails.
 pub fn to_string<T: Serialize>(value: &T) -> Result<String> {
     let mut buf = Vec::new();
     to_writer(&mut buf, value)?;
@@ -12,6 +16,10 @@ pub fn to_string<T: Serialize>(value: &T) -> Result<String> {
 }
 
 /// Serialize a `T` to an AYML byte vector.
+///
+/// # Errors
+///
+/// Returns an error if serialization fails.
 pub fn to_vec<T: Serialize>(value: &T) -> Result<Vec<u8>> {
     let mut buf = Vec::new();
     to_writer(&mut buf, value)?;
@@ -19,6 +27,10 @@ pub fn to_vec<T: Serialize>(value: &T) -> Result<Vec<u8>> {
 }
 
 /// Serialize a `T` as AYML into a writer.
+///
+/// # Errors
+///
+/// Returns an error if serialization or I/O fails.
 pub fn to_writer<W: std::io::Write, T: Serialize>(writer: W, value: &T) -> Result<()> {
     let mut ser = Serializer::new(writer);
     value.serialize(&mut ser)?;
@@ -95,7 +107,7 @@ impl<W: std::io::Write> Serializer<W> {
     }
 
     /// Write the prefix for an enum variant key (Variant: ...).
-    /// Handles after_key/compact like Compound::write_key_prefix.
+    /// Handles `after_key`/`compact` like `Compound::write_key_prefix`.
     /// Returns true if indent was bumped by 2.
     fn variant_key_prefix(&mut self, variant: &str) -> Result<bool> {
         self.flush_pending_dash()?;
@@ -136,15 +148,15 @@ impl<'a, W: std::io::Write> ser::Serializer for &'a mut Serializer<W> {
     }
 
     fn serialize_i8(self, v: i8) -> Result<()> {
-        self.serialize_i64(v as i64)
+        self.serialize_i64(i64::from(v))
     }
 
     fn serialize_i16(self, v: i16) -> Result<()> {
-        self.serialize_i64(v as i64)
+        self.serialize_i64(i64::from(v))
     }
 
     fn serialize_i32(self, v: i32) -> Result<()> {
-        self.serialize_i64(v as i64)
+        self.serialize_i64(i64::from(v))
     }
 
     fn serialize_i64(self, v: i64) -> Result<()> {
@@ -154,15 +166,15 @@ impl<'a, W: std::io::Write> ser::Serializer for &'a mut Serializer<W> {
     }
 
     fn serialize_u8(self, v: u8) -> Result<()> {
-        self.serialize_u64(v as u64)
+        self.serialize_u64(u64::from(v))
     }
 
     fn serialize_u16(self, v: u16) -> Result<()> {
-        self.serialize_u64(v as u64)
+        self.serialize_u64(u64::from(v))
     }
 
     fn serialize_u32(self, v: u32) -> Result<()> {
-        self.serialize_u64(v as u64)
+        self.serialize_u64(u64::from(v))
     }
 
     fn serialize_u64(self, v: u64) -> Result<()> {
@@ -172,7 +184,7 @@ impl<'a, W: std::io::Write> ser::Serializer for &'a mut Serializer<W> {
     }
 
     fn serialize_f32(self, v: f32) -> Result<()> {
-        self.serialize_f64(v as f64)
+        self.serialize_f64(f64::from(v))
     }
 
     fn serialize_f64(self, v: f64) -> Result<()> {
@@ -320,7 +332,7 @@ impl<'a, W: std::io::Write> ser::Serializer for &'a mut Serializer<W> {
     }
 
     fn serialize_struct(self, name: &'static str, _len: usize) -> Result<Self::SerializeStruct> {
-        if name == crate::commentable::COMMENTED_STRUCT {
+        if name == crate::commented::COMMENTED_STRUCT {
             return Ok(Compound {
                 ser: self,
                 first: true,
@@ -446,12 +458,13 @@ impl<W: std::io::Write> ser::SerializeTupleVariant for SeqState<'_, W> {
 
 // ── Compound (SerializeMap / SerializeStruct) ───────────────────
 
+#[allow(clippy::struct_excessive_bools)]
 struct Compound<'a, W> {
     ser: &'a mut Serializer<W>,
     first: bool,
     /// True if we bumped indent by 2 for a nested mapping after "key:".
     bumped: bool,
-    /// True if variant_key_prefix already bumped indent (for struct variants).
+    /// True if `variant_key_prefix` already bumped indent (for struct variants).
     variant_bumped: bool,
     /// True when this Compound represents a `Commented<T>`.
     commented: bool,
@@ -490,7 +503,7 @@ impl<W: std::io::Write> Compound<'_, W> {
         key: &'static str,
         value: &T,
     ) -> Result<()> {
-        use crate::commentable::*;
+        use crate::commented::{FIELD_INLINE_COMMENT, FIELD_TOP_COMMENT, FIELD_VALUE};
         match key {
             FIELD_TOP_COMMENT => {
                 self.top_comment = capture_option_string(value);
@@ -656,6 +669,7 @@ impl<W: std::io::Write> ser::SerializeStructVariant for Compound<'_, W> {
 // ── Commented helpers ───────────────────────────────────────────
 
 /// Serialize a value (expected to be `Option<String>`) and capture it.
+#[allow(clippy::too_many_lines)]
 fn capture_option_string<T: ?Sized + Serialize>(value: &T) -> Option<String> {
     use serde::ser::Impossible;
 
@@ -831,12 +845,10 @@ fn needs_quoting(s: &str) -> bool {
     // Contains characters that would break bare string parsing
     for (i, &b) in bytes.iter().enumerate() {
         match b {
-            // Control characters / non-printable
-            0x00..=0x08 | 0x0B | 0x0C | 0x0E..=0x1F | 0x7F => return true,
-            // Line breaks — bare strings are single-line
-            b'\n' | b'\r' => return true,
-            // Embedded quotes need escaping
-            b'"' | b'\\' => return true,
+            // Control characters, line breaks, or characters needing escaping
+            0x00..=0x08 | 0x0B | 0x0C | 0x0E..=0x1F | 0x7F | b'\n' | b'\r' | b'"' | b'\\' => {
+                return true;
+            }
             // `: ` mid-string would be parsed as mapping indicator
             b':' if i + 1 < bytes.len() && bytes[i + 1] == b' ' => return true,
             // ` #` would start a comment

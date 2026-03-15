@@ -109,10 +109,10 @@ fn de_any_null() {
     #[derive(Deserialize, Debug, PartialEq)]
     #[serde(untagged)]
     enum Any {
-        Null(()),
+        Null,
         Int(i64),
     }
-    assert_eq!(from_str::<Any>("null").unwrap(), Any::Null(()));
+    assert_eq!(from_str::<Any>("null").unwrap(), Any::Null);
 }
 
 #[test]

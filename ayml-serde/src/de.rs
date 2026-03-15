@@ -7,6 +7,11 @@ use crate::read::{IoRead, Read, StrRead};
 ///
 /// The bound `T: Deserialize<'a>` (rather than `DeserializeOwned`) allows
 /// zero-copy deserialization of borrowed types like `&'a str`.
+///
+/// # Errors
+///
+/// Returns an error if the input is not valid AYML or cannot be
+/// deserialized into `T`.
 pub fn from_str<'a, T: serde::Deserialize<'a>>(s: &'a str) -> Result<T> {
     let mut de = Deserializer::from_str(s);
     let value = T::deserialize(&mut de)?;
@@ -18,6 +23,11 @@ pub fn from_str<'a, T: serde::Deserialize<'a>>(s: &'a str) -> Result<T> {
 ///
 /// AYML is UTF-8; this validates the input and then deserializes.
 /// Supports borrowing from the input slice (`T: Deserialize<'a>`).
+///
+/// # Errors
+///
+/// Returns an error if the input is not valid UTF-8, not valid AYML,
+/// or cannot be deserialized into `T`.
 pub fn from_slice<'a, T: serde::Deserialize<'a>>(bytes: &'a [u8]) -> Result<T> {
     let s =
         std::str::from_utf8(bytes).map_err(|e| Error::Message(format!("invalid UTF-8: {e}")))?;
@@ -29,6 +39,11 @@ pub fn from_slice<'a, T: serde::Deserialize<'a>>(bytes: &'a [u8]) -> Result<T> {
 /// Data is read lazily from the reader as the deserializer advances.
 /// The deserialized value cannot borrow from the input; use [`from_str`]
 /// or [`from_slice`] for zero-copy deserialization.
+///
+/// # Errors
+///
+/// Returns an error on I/O failure, invalid AYML, or if the data
+/// cannot be deserialized into `T`.
 pub fn from_reader<R: std::io::Read, T: DeserializeOwned>(rdr: R) -> Result<T> {
     let mut de = Deserializer::from_reader(rdr);
     let value = T::deserialize(&mut de)?;
@@ -563,6 +578,7 @@ impl<'de, R: Read<'de>> Deserializer<R> {
             // Also accept integer-shaped text as float
             visitor.visit_f64(f)
         } else if let Ok(Some(i)) = try_parse_int(&text) {
+            #[allow(clippy::cast_precision_loss)]
             visitor.visit_f64(i as f64)
         } else {
             Err(self.error(&format!("expected float, got `{text}`")))
@@ -895,26 +911,23 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
     fn deserialize_map<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         self.skip_whitespace_and_comments()?;
         self.enter_collection()?;
-        match self.peek()? {
-            Some('{') => {
-                self.advance()?;
-                let prev_ctx = self.ctx;
-                let value = visitor.visit_map(MapAccess::new(self, MapStyle::Flow));
-                self.leave_collection();
-                let value = value?;
-                self.skip_whitespace_and_comments()?;
-                if !self.eat('}')? {
-                    return Err(self.error("expected `}` to close mapping"));
-                }
-                self.ctx = prev_ctx;
-                Ok(value)
+        if let Some('{') = self.peek()? {
+            self.advance()?;
+            let prev_ctx = self.ctx;
+            let value = visitor.visit_map(MapAccess::new(self, MapStyle::Flow));
+            self.leave_collection();
+            let value = value?;
+            self.skip_whitespace_and_comments()?;
+            if !self.eat('}')? {
+                return Err(self.error("expected `}` to close mapping"));
             }
-            _ => {
-                let indent = self.current_indent();
-                let value = visitor.visit_map(MapAccess::new(self, MapStyle::Block(indent)));
-                self.leave_collection();
-                value
-            }
+            self.ctx = prev_ctx;
+            Ok(value)
+        } else {
+            let indent = self.current_indent();
+            let value = visitor.visit_map(MapAccess::new(self, MapStyle::Block(indent)));
+            self.leave_collection();
+            value
         }
     }
 
@@ -924,7 +937,7 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
         _fields: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value> {
-        if name == crate::commentable::COMMENTED_STRUCT {
+        if name == crate::commented::COMMENTED_STRUCT {
             return self.deserialize_commented(visitor);
         }
         self.deserialize_map(visitor)
@@ -937,45 +950,42 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
         visitor: V,
     ) -> Result<V::Value> {
         self.skip_whitespace_and_comments()?;
-        match self.peek()? {
-            Some('{') => {
-                // Flow mapping: {VariantName: value}
-                self.advance()?; // eat '{'
-                let prev_ctx = self.ctx;
-                self.ctx = Context::Flow;
-                self.skip_whitespace_and_comments()?;
-                let value = visitor.visit_enum(EnumAccess {
+        if let Some('{') = self.peek()? {
+            // Flow mapping: {VariantName: value}
+            self.advance()?; // eat '{'
+            let prev_ctx = self.ctx;
+            self.ctx = Context::Flow;
+            self.skip_whitespace_and_comments()?;
+            let value = visitor.visit_enum(EnumAccess {
+                de: self,
+                style: EnumStyle::Mapping,
+            })?;
+            self.skip_whitespace_and_comments()?;
+            if !self.eat('}')? {
+                return Err(self.error("expected `}` to close enum mapping"));
+            }
+            self.ctx = prev_ctx;
+            Ok(value)
+        } else {
+            // Could be a unit variant (bare string) or block mapping (key: value).
+            // Lookahead: scan the key, check for `: `.
+            let start = self.offset();
+            let _text = self.scan_scalar_string(self.ctx)?;
+            self.skip_inline_whitespace()?;
+            if self.is_mapping_value_indicator()? {
+                // Block mapping style: VariantName: value
+                self.set_offset(start);
+                visitor.visit_enum(EnumAccess {
                     de: self,
                     style: EnumStyle::Mapping,
-                })?;
-                self.skip_whitespace_and_comments()?;
-                if !self.eat('}')? {
-                    return Err(self.error("expected `}` to close enum mapping"));
-                }
-                self.ctx = prev_ctx;
-                Ok(value)
-            }
-            _ => {
-                // Could be a unit variant (bare string) or block mapping (key: value).
-                // Lookahead: scan the key, check for `: `.
-                let start = self.offset();
-                let _text = self.scan_scalar_string(self.ctx)?;
-                self.skip_inline_whitespace()?;
-                if self.is_mapping_value_indicator()? {
-                    // Block mapping style: VariantName: value
-                    self.set_offset(start);
-                    visitor.visit_enum(EnumAccess {
-                        de: self,
-                        style: EnumStyle::Mapping,
-                    })
-                } else {
-                    // Unit variant: just a bare string
-                    self.set_offset(start);
-                    visitor.visit_enum(EnumAccess {
-                        de: self,
-                        style: EnumStyle::Unit,
-                    })
-                }
+                })
+            } else {
+                // Unit variant: just a bare string
+                self.set_offset(start);
+                visitor.visit_enum(EnumAccess {
+                    de: self,
+                    style: EnumStyle::Unit,
+                })
             }
         }
     }
@@ -1012,7 +1022,7 @@ impl<'a, R> SeqAccess<'a, R> {
     }
 }
 
-impl<'a, 'de, R: Read<'de>> de::SeqAccess<'de> for SeqAccess<'a, R> {
+impl<'de, R: Read<'de>> de::SeqAccess<'de> for SeqAccess<'_, R> {
     type Error = Error;
 
     fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>>
@@ -1124,7 +1134,7 @@ impl<'a, R> MapAccess<'a, R> {
     }
 }
 
-impl<'a, 'de, R: Read<'de>> de::MapAccess<'de> for MapAccess<'a, R> {
+impl<'de, R: Read<'de>> de::MapAccess<'de> for MapAccess<'_, R> {
     type Error = Error;
 
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>
@@ -1244,14 +1254,14 @@ struct CommentedAccess<'a, R> {
     value_start: usize,
 }
 
-impl<'a, 'de, R: Read<'de>> de::MapAccess<'de> for CommentedAccess<'a, R> {
+impl<'de, R: Read<'de>> de::MapAccess<'de> for CommentedAccess<'_, R> {
     type Error = Error;
 
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>
     where
         K: de::DeserializeSeed<'de>,
     {
-        use crate::commentable::*;
+        use crate::commented::{FIELD_INLINE_COMMENT, FIELD_TOP_COMMENT, FIELD_VALUE};
         let key = match self.state {
             CommentedState::TopComment => FIELD_TOP_COMMENT,
             CommentedState::Value => FIELD_VALUE,
@@ -1369,7 +1379,7 @@ struct VariantAccess<'a, R> {
     de: &'a mut Deserializer<R>,
 }
 
-impl<'a, 'de, R: Read<'de>> de::VariantAccess<'de> for VariantAccess<'a, R> {
+impl<'de, R: Read<'de>> de::VariantAccess<'de> for VariantAccess<'_, R> {
     type Error = Error;
 
     fn unit_variant(self) -> Result<()> {

@@ -86,7 +86,7 @@ impl<R: std::io::Read> IoRead<R> {
     }
 }
 
-impl<'de, R: std::io::Read> Read<'de> for IoRead<R> {
+impl<R: std::io::Read> Read<'_> for IoRead<R> {
     fn fill_to(&mut self, pos: usize) -> Result<bool> {
         while self.buf.len() < pos && !self.done {
             let mut tmp = [0u8; 4096];

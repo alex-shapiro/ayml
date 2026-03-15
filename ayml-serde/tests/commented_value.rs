@@ -91,7 +91,7 @@ fn de_commented_value_seq() {
 fn de_commented_value_null() {
     let input = "null\n";
     let cv: CommentedValue = ayml_serde::from_str(input).unwrap();
-    assert!(matches!(cv.value, CommentedValueKind::Null(())));
+    assert!(matches!(cv.value, CommentedValueKind::Null));
 }
 
 #[test]
@@ -156,10 +156,7 @@ fn ser_multi_key_nested_map() {
         "false".to_string(),
         Commented::new(CommentedValueKind::Int(-1)),
     );
-    outer_map.insert(
-        "null".to_string(),
-        Commented::new(CommentedValueKind::Null(())),
-    );
+    outer_map.insert("null".to_string(), Commented::new(CommentedValueKind::Null));
     outer_map.insert(
         "42".to_string(),
         Commented::new(CommentedValueKind::Map(inner_map)),
@@ -197,7 +194,7 @@ fn ser_proptest_repro() {
         CommentedValue {
             top_comment: Some("null comment".into()),
             inline_comment: None,
-            value: CommentedValueKind::Null(()),
+            value: CommentedValueKind::Null,
         },
     );
     outer_map.insert(
@@ -244,7 +241,7 @@ fn ser_commented_then_nested_map() {
         first: CommentedValue {
             top_comment: Some("first comment".into()),
             inline_comment: None,
-            value: CommentedValueKind::Null(()),
+            value: CommentedValueKind::Null,
         },
         second: Commented::new(CommentedValueKind::Map(inner_map)),
         third: Commented::new(CommentedValueKind::Int(-1)),
