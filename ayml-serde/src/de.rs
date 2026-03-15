@@ -630,8 +630,9 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
             Some('"') => {
                 let start = self.offset();
                 let s = self.scan_double_quoted()?;
-                // Check if this is a mapping key (but not if we're already reading a key)
-                if !self.reading_key {
+                // Check if this is a mapping key (but not if we're already reading a key,
+                // and not in flow context where maps use explicit `{}`).
+                if !self.reading_key && self.ctx == Context::Block {
                     self.skip_inline_whitespace()?;
                     if self.is_mapping_value_indicator()? {
                         self.set_offset(start);
@@ -673,7 +674,7 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
                 self.ctx = prev_ctx;
                 Ok(value)
             }
-            Some('-') if self.peek_nth(1)? == Some(' ') => {
+            Some('-') if self.ctx == Context::Block && self.peek_nth(1)? == Some(' ') => {
                 let indent = self.current_indent();
                 self.enter_collection()?;
                 let value = visitor.visit_seq(SeqAccess::new(self, SeqStyle::Block(indent)));
@@ -682,10 +683,11 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
             }
             Some(_) => {
                 // Bare scalar — but check if it's a mapping key first
-                // (skip this check if we're already reading a key)
+                // (skip this check if we're already reading a key, and not
+                // in flow context where maps use explicit `{}`).
                 let start = self.offset();
                 let text = self.scan_bare_string(self.ctx)?;
-                if !self.reading_key {
+                if !self.reading_key && self.ctx == Context::Block {
                     self.skip_inline_whitespace()?;
                     if self.is_mapping_value_indicator()? {
                         self.set_offset(start);

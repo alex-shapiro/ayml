@@ -1,20 +1,25 @@
 //! An untyped AYML value, analogous to `serde_json::Value`.
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+use serde::de::{self, Deserializer, Visitor};
 use std::collections::HashMap;
 use std::fmt;
 
 /// An untyped AYML value that can represent any AYML document.
 ///
 /// Covers all six AYML value kinds: null, boolean, integer, float,
-/// string, sequence, and mapping. Uses `#[serde(untagged)]` so it
-/// deserializes naturally from any AYML input via `deserialize_any`.
+/// string, sequence, and mapping.
+///
+/// Uses a hand-written `Deserialize` impl (like `serde_json::Value`)
+/// that calls `deserialize_any` directly instead of `#[serde(untagged)]`,
+/// avoiding the intermediate `Content` buffering that would otherwise
+/// duplicate every node in the tree during deserialization.
 ///
 /// # Equality
 ///
 /// `PartialEq` is NaN-aware: two `Float(NaN)` values compare equal,
 /// matching the expectation that a roundtripped NaN should equal itself.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 pub enum Value {
     /// AYML `null`.
@@ -32,6 +37,70 @@ pub enum Value {
     /// AYML mapping (`key: value` pairs or `{...}` flow).
     Map(HashMap<String, Value>),
 }
+
+// ── Deserialize ─────────────────────────────────────────────────────
+
+impl<'de> serde::Deserialize<'de> for Value {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_any(ValueVisitor)
+    }
+}
+
+struct ValueVisitor;
+
+impl<'de> Visitor<'de> for ValueVisitor {
+    type Value = Value;
+
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "any AYML value")
+    }
+
+    fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+        Ok(Value::Null)
+    }
+
+    fn visit_bool<E: de::Error>(self, v: bool) -> Result<Self::Value, E> {
+        Ok(Value::Bool(v))
+    }
+
+    fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> {
+        Ok(Value::Int(v))
+    }
+
+    fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> {
+        Ok(Value::Int(v.cast_signed()))
+    }
+
+    fn visit_f64<E: de::Error>(self, v: f64) -> Result<Self::Value, E> {
+        Ok(Value::Float(v))
+    }
+
+    fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+        Ok(Value::Str(v.to_owned()))
+    }
+
+    fn visit_string<E: de::Error>(self, v: String) -> Result<Self::Value, E> {
+        Ok(Value::Str(v))
+    }
+
+    fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let mut items = Vec::new();
+        while let Some(item) = seq.next_element()? {
+            items.push(item);
+        }
+        Ok(Value::Seq(items))
+    }
+
+    fn visit_map<A: de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let mut entries = HashMap::new();
+        while let Some((key, value)) = map.next_entry()? {
+            entries.insert(key, value);
+        }
+        Ok(Value::Map(entries))
+    }
+}
+
+// ── PartialEq / Eq ─────────────────────────────────────────────────
 
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
