@@ -22,6 +22,7 @@ pub fn to_vec<T: Serialize>(value: &T) -> Result<Vec<u8>> {
 pub fn to_writer<W: std::io::Write, T: Serialize>(writer: W, value: &T) -> Result<()> {
     let mut ser = Serializer::new(writer);
     value.serialize(&mut ser)?;
+    ser.write_str("\n")?;
     Ok(())
 }
 
@@ -29,31 +30,69 @@ pub fn to_writer<W: std::io::Write, T: Serialize>(writer: W, value: &T) -> Resul
 
 struct Serializer<W> {
     writer: W,
+    indent: usize,
+    /// After writing "key:", the next scalar gets " " prefix;
+    /// the next collection gets "\n" and appropriate indent bump.
+    after_key: bool,
+    /// After writing "- ", the next struct/map first entry goes inline
+    /// (compact notation) — suppress indent for the first entry only.
+    compact: bool,
 }
 
 impl<W: std::io::Write> Serializer<W> {
     fn new(writer: W) -> Self {
-        Self { writer }
+        Self {
+            writer,
+            indent: 0,
+            after_key: false,
+            compact: false,
+        }
     }
 
     fn write_str(&mut self, s: &str) -> Result<()> {
         self.writer.write_all(s.as_bytes()).map_err(Error::from)
     }
+
+    fn write_indent(&mut self) -> Result<()> {
+        if self.indent > 0 {
+            // Avoid allocation for common indent depths
+            const SPACES: &[u8; 32] = b"                                ";
+            let mut n = self.indent;
+            while n > 0 {
+                let chunk = n.min(SPACES.len());
+                self.writer
+                    .write_all(&SPACES[..chunk])
+                    .map_err(Error::from)?;
+                n -= chunk;
+            }
+        }
+        Ok(())
+    }
+
+    /// Write the inline prefix for a scalar value that follows "key:".
+    fn scalar_prefix(&mut self) -> Result<()> {
+        if self.after_key {
+            self.write_str(" ")?;
+            self.after_key = false;
+        }
+        Ok(())
+    }
 }
 
-impl<W: std::io::Write> ser::Serializer for &mut Serializer<W> {
+impl<'a, W: std::io::Write> ser::Serializer for &'a mut Serializer<W> {
     type Ok = ();
     type Error = Error;
 
-    type SerializeSeq = ser::Impossible<(), Error>;
-    type SerializeTuple = ser::Impossible<(), Error>;
-    type SerializeTupleStruct = ser::Impossible<(), Error>;
-    type SerializeTupleVariant = ser::Impossible<(), Error>;
-    type SerializeMap = ser::Impossible<(), Error>;
-    type SerializeStruct = ser::Impossible<(), Error>;
-    type SerializeStructVariant = ser::Impossible<(), Error>;
+    type SerializeSeq = SeqState<'a, W>;
+    type SerializeTuple = SeqState<'a, W>;
+    type SerializeTupleStruct = SeqState<'a, W>;
+    type SerializeTupleVariant = SeqState<'a, W>;
+    type SerializeMap = Compound<'a, W>;
+    type SerializeStruct = Compound<'a, W>;
+    type SerializeStructVariant = Compound<'a, W>;
 
     fn serialize_bool(self, v: bool) -> Result<()> {
+        self.scalar_prefix()?;
         self.write_str(if v { "true" } else { "false" })
     }
 
@@ -70,6 +109,7 @@ impl<W: std::io::Write> ser::Serializer for &mut Serializer<W> {
     }
 
     fn serialize_i64(self, v: i64) -> Result<()> {
+        self.scalar_prefix()?;
         let mut buf = itoa::Buffer::new();
         self.write_str(buf.format(v))
     }
@@ -87,6 +127,7 @@ impl<W: std::io::Write> ser::Serializer for &mut Serializer<W> {
     }
 
     fn serialize_u64(self, v: u64) -> Result<()> {
+        self.scalar_prefix()?;
         let mut buf = itoa::Buffer::new();
         self.write_str(buf.format(v))
     }
@@ -96,6 +137,7 @@ impl<W: std::io::Write> ser::Serializer for &mut Serializer<W> {
     }
 
     fn serialize_f64(self, v: f64) -> Result<()> {
+        self.scalar_prefix()?;
         if v.is_nan() {
             self.write_str("nan")
         } else if v.is_infinite() {
@@ -107,9 +149,6 @@ impl<W: std::io::Write> ser::Serializer for &mut Serializer<W> {
         } else {
             let mut buf = ryu::Buffer::new();
             let s = buf.format_finite(v);
-            // ryu may produce "1.0" or "1e0" etc. — AYML floats must have
-            // a dot or exponent to distinguish from integers. ryu always
-            // includes one or both, so we can emit as-is.
             self.write_str(s)
         }
     }
@@ -121,6 +160,7 @@ impl<W: std::io::Write> ser::Serializer for &mut Serializer<W> {
     }
 
     fn serialize_str(self, v: &str) -> Result<()> {
+        self.scalar_prefix()?;
         if v.is_empty() {
             return self.write_str(r#""""#);
         }
@@ -132,7 +172,7 @@ impl<W: std::io::Write> ser::Serializer for &mut Serializer<W> {
     }
 
     fn serialize_bytes(self, v: &[u8]) -> Result<()> {
-        // Emit as a flow sequence of integers
+        self.scalar_prefix()?;
         self.write_str("[")?;
         for (i, &byte) in v.iter().enumerate() {
             if i > 0 {
@@ -145,6 +185,7 @@ impl<W: std::io::Write> ser::Serializer for &mut Serializer<W> {
     }
 
     fn serialize_none(self) -> Result<()> {
+        self.scalar_prefix()?;
         self.write_str("null")
     }
 
@@ -153,10 +194,12 @@ impl<W: std::io::Write> ser::Serializer for &mut Serializer<W> {
     }
 
     fn serialize_unit(self) -> Result<()> {
+        self.scalar_prefix()?;
         self.write_str("null")
     }
 
     fn serialize_unit_struct(self, _name: &'static str) -> Result<()> {
+        self.scalar_prefix()?;
         self.write_str("null")
     }
 
@@ -181,18 +224,25 @@ impl<W: std::io::Write> ser::Serializer for &mut Serializer<W> {
         self,
         _name: &'static str,
         _variant_index: u32,
-        _variant: &'static str,
-        _value: &T,
+        variant: &'static str,
+        value: &T,
     ) -> Result<()> {
-        todo!()
+        self.scalar_prefix()?;
+        write_key(&mut self.writer, variant)?;
+        self.write_str(":")?;
+        self.after_key = true;
+        value.serialize(self)
     }
 
     fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq> {
-        todo!()
+        Ok(SeqState {
+            ser: self,
+            first: true,
+        })
     }
 
     fn serialize_tuple(self, _len: usize) -> Result<Self::SerializeTuple> {
-        todo!()
+        self.serialize_seq(None)
     }
 
     fn serialize_tuple_struct(
@@ -200,35 +250,241 @@ impl<W: std::io::Write> ser::Serializer for &mut Serializer<W> {
         _name: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeTupleStruct> {
-        todo!()
+        self.serialize_seq(None)
     }
 
     fn serialize_tuple_variant(
         self,
         _name: &'static str,
         _variant_index: u32,
-        _variant: &'static str,
+        variant: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeTupleVariant> {
-        todo!()
+        self.scalar_prefix()?;
+        write_key(&mut self.writer, variant)?;
+        self.write_str(":")?;
+        self.after_key = true;
+        self.serialize_seq(None)
     }
 
     fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap> {
-        todo!()
+        Ok(Compound {
+            ser: self,
+            first: true,
+            bumped: false,
+        })
     }
 
     fn serialize_struct(self, _name: &'static str, _len: usize) -> Result<Self::SerializeStruct> {
-        todo!()
+        self.serialize_map(None)
     }
 
     fn serialize_struct_variant(
         self,
         _name: &'static str,
         _variant_index: u32,
-        _variant: &'static str,
+        variant: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeStructVariant> {
-        todo!()
+        self.scalar_prefix()?;
+        write_key(&mut self.writer, variant)?;
+        self.write_str(":")?;
+        self.after_key = true;
+        self.serialize_map(None)
+    }
+}
+
+// ── SeqState (SerializeSeq / SerializeTuple) ────────────────────
+
+struct SeqState<'a, W> {
+    ser: &'a mut Serializer<W>,
+    first: bool,
+}
+
+impl<W: std::io::Write> ser::SerializeSeq for SeqState<'_, W> {
+    type Ok = ();
+    type Error = Error;
+
+    fn serialize_element<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<()> {
+        if self.first {
+            if self.ser.after_key {
+                self.ser.write_str("\n")?;
+                self.ser.after_key = false;
+            }
+            if self.ser.compact {
+                self.ser.compact = false;
+            } else {
+                self.ser.write_indent()?;
+            }
+            self.first = false;
+        } else {
+            self.ser.write_str("\n")?;
+            self.ser.write_indent()?;
+        }
+        self.ser.write_str("- ")?;
+        self.ser.indent += 2;
+        self.ser.compact = true;
+        value.serialize(&mut *self.ser)?;
+        self.ser.compact = false;
+        self.ser.indent -= 2;
+        Ok(())
+    }
+
+    fn end(self) -> Result<()> {
+        if self.first {
+            // Empty sequence — use flow style
+            if self.ser.after_key {
+                self.ser.write_str(" ")?;
+                self.ser.after_key = false;
+            }
+            self.ser.write_str("[]")?;
+        }
+        Ok(())
+    }
+}
+
+impl<W: std::io::Write> ser::SerializeTuple for SeqState<'_, W> {
+    type Ok = ();
+    type Error = Error;
+
+    fn serialize_element<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<()> {
+        ser::SerializeSeq::serialize_element(self, value)
+    }
+
+    fn end(self) -> Result<()> {
+        ser::SerializeSeq::end(self)
+    }
+}
+
+impl<W: std::io::Write> ser::SerializeTupleStruct for SeqState<'_, W> {
+    type Ok = ();
+    type Error = Error;
+
+    fn serialize_field<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<()> {
+        ser::SerializeSeq::serialize_element(self, value)
+    }
+
+    fn end(self) -> Result<()> {
+        ser::SerializeSeq::end(self)
+    }
+}
+
+impl<W: std::io::Write> ser::SerializeTupleVariant for SeqState<'_, W> {
+    type Ok = ();
+    type Error = Error;
+
+    fn serialize_field<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<()> {
+        ser::SerializeSeq::serialize_element(self, value)
+    }
+
+    fn end(self) -> Result<()> {
+        ser::SerializeSeq::end(self)
+    }
+}
+
+// ── Compound (SerializeMap / SerializeStruct) ───────────────────
+
+struct Compound<'a, W> {
+    ser: &'a mut Serializer<W>,
+    first: bool,
+    /// True if we bumped indent by 2 for a nested mapping after "key:".
+    bumped: bool,
+}
+
+impl<W: std::io::Write> Compound<'_, W> {
+    fn write_key_prefix(&mut self) -> Result<()> {
+        if self.first {
+            if self.ser.after_key {
+                self.ser.write_str("\n")?;
+                self.ser.after_key = false;
+                self.ser.indent += 2;
+                self.bumped = true;
+            }
+            if self.ser.compact {
+                self.ser.compact = false;
+            } else {
+                self.ser.write_indent()?;
+            }
+            self.first = false;
+        } else {
+            self.ser.write_str("\n")?;
+            self.ser.write_indent()?;
+        }
+        Ok(())
+    }
+
+    fn end_compound(self) -> Result<()> {
+        if self.first {
+            // Empty map — use flow style
+            if self.ser.after_key {
+                self.ser.write_str(" ")?;
+                self.ser.after_key = false;
+            }
+            self.ser.write_str("{}")?;
+        }
+        if self.bumped {
+            self.ser.indent -= 2;
+        }
+        Ok(())
+    }
+}
+
+impl<W: std::io::Write> ser::SerializeMap for Compound<'_, W> {
+    type Ok = ();
+    type Error = Error;
+
+    fn serialize_key<T: ?Sized + Serialize>(&mut self, key: &T) -> Result<()> {
+        self.write_key_prefix()?;
+        key.serialize(&mut *self.ser)?;
+        self.ser.write_str(":")?;
+        self.ser.after_key = true;
+        Ok(())
+    }
+
+    fn serialize_value<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<()> {
+        value.serialize(&mut *self.ser)
+    }
+
+    fn end(self) -> Result<()> {
+        self.end_compound()
+    }
+}
+
+impl<W: std::io::Write> ser::SerializeStruct for Compound<'_, W> {
+    type Ok = ();
+    type Error = Error;
+
+    fn serialize_field<T: ?Sized + Serialize>(
+        &mut self,
+        key: &'static str,
+        value: &T,
+    ) -> Result<()> {
+        self.write_key_prefix()?;
+        self.ser.write_str(key)?;
+        self.ser.write_str(":")?;
+        self.ser.after_key = true;
+        value.serialize(&mut *self.ser)
+    }
+
+    fn end(self) -> Result<()> {
+        self.end_compound()
+    }
+}
+
+impl<W: std::io::Write> ser::SerializeStructVariant for Compound<'_, W> {
+    type Ok = ();
+    type Error = Error;
+
+    fn serialize_field<T: ?Sized + Serialize>(
+        &mut self,
+        key: &'static str,
+        value: &T,
+    ) -> Result<()> {
+        ser::SerializeStruct::serialize_field(self, key, value)
+    }
+
+    fn end(self) -> Result<()> {
+        self.end_compound()
     }
 }
 
@@ -362,123 +618,128 @@ fn write_quoted<W: std::io::Write>(w: &mut W, s: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Write a mapping key, quoting if necessary.
+fn write_key<W: std::io::Write>(w: &mut W, key: &str) -> Result<()> {
+    if key.is_empty() || needs_quoting(key) {
+        write_quoted(w, key).map_err(Error::from)
+    } else {
+        w.write_all(key.as_bytes()).map_err(Error::from)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    // ── Scalar tests ────────────────────────────────────────────
+
     #[test]
     fn test_bool() {
-        assert_eq!(to_string(&true).unwrap(), "true");
-        assert_eq!(to_string(&false).unwrap(), "false");
+        assert_eq!(to_string(&true).unwrap(), "true\n");
+        assert_eq!(to_string(&false).unwrap(), "false\n");
     }
 
     #[test]
     fn test_integers() {
-        assert_eq!(to_string(&0i32).unwrap(), "0");
-        assert_eq!(to_string(&42i32).unwrap(), "42");
-        assert_eq!(to_string(&-17i64).unwrap(), "-17");
-        assert_eq!(to_string(&255u8).unwrap(), "255");
-        assert_eq!(to_string(&u64::MAX).unwrap(), "18446744073709551615");
+        assert_eq!(to_string(&0i32).unwrap(), "0\n");
+        assert_eq!(to_string(&42i32).unwrap(), "42\n");
+        assert_eq!(to_string(&-17i64).unwrap(), "-17\n");
+        assert_eq!(to_string(&255u8).unwrap(), "255\n");
+        assert_eq!(to_string(&u64::MAX).unwrap(), "18446744073709551615\n");
     }
 
     #[test]
     fn test_floats() {
-        assert_eq!(to_string(&3.14f64).unwrap(), "3.14");
-        assert_eq!(to_string(&-0.5f64).unwrap(), "-0.5");
-        assert_eq!(to_string(&f64::INFINITY).unwrap(), "inf");
-        assert_eq!(to_string(&f64::NEG_INFINITY).unwrap(), "-inf");
-        assert_eq!(to_string(&f64::NAN).unwrap(), "nan");
+        assert_eq!(to_string(&3.14f64).unwrap(), "3.14\n");
+        assert_eq!(to_string(&-0.5f64).unwrap(), "-0.5\n");
+        assert_eq!(to_string(&f64::INFINITY).unwrap(), "inf\n");
+        assert_eq!(to_string(&f64::NEG_INFINITY).unwrap(), "-inf\n");
+        assert_eq!(to_string(&f64::NAN).unwrap(), "nan\n");
     }
 
     #[test]
     fn test_float_whole_number() {
-        // ryu emits "1.0" for 1.0f64 — must not be confused with integer
         let s = to_string(&1.0f64).unwrap();
-        assert!(s.contains('.') || s.contains('e') || s.contains('E'));
+        assert!(s.trim_end().contains('.') || s.contains('e') || s.contains('E'));
     }
 
     #[test]
     fn test_string_bare() {
-        assert_eq!(to_string(&"hello").unwrap(), "hello");
-        assert_eq!(to_string(&"hello world").unwrap(), "hello world");
+        assert_eq!(to_string(&"hello").unwrap(), "hello\n");
+        assert_eq!(to_string(&"hello world").unwrap(), "hello world\n");
         assert_eq!(
             to_string(&"https://example.com").unwrap(),
-            "https://example.com"
+            "https://example.com\n"
         );
     }
 
     #[test]
     fn test_string_empty() {
-        assert_eq!(to_string(&"").unwrap(), r#""""#);
+        assert_eq!(to_string(&"").unwrap(), "\"\"\n");
     }
 
     #[test]
     fn test_string_needs_quoting() {
-        // Reserved words
-        assert_eq!(to_string(&"null").unwrap(), r#""null""#);
-        assert_eq!(to_string(&"true").unwrap(), r#""true""#);
-        assert_eq!(to_string(&"false").unwrap(), r#""false""#);
-        assert_eq!(to_string(&"inf").unwrap(), r#""inf""#);
-        assert_eq!(to_string(&"nan").unwrap(), r#""nan""#);
-
-        // Looks like number
-        assert_eq!(to_string(&"42").unwrap(), r#""42""#);
-        assert_eq!(to_string(&"3.14").unwrap(), r#""3.14""#);
-        assert_eq!(to_string(&"0xFF").unwrap(), r#""0xFF""#);
+        assert_eq!(to_string(&"null").unwrap(), "\"null\"\n");
+        assert_eq!(to_string(&"true").unwrap(), "\"true\"\n");
+        assert_eq!(to_string(&"false").unwrap(), "\"false\"\n");
+        assert_eq!(to_string(&"inf").unwrap(), "\"inf\"\n");
+        assert_eq!(to_string(&"nan").unwrap(), "\"nan\"\n");
+        assert_eq!(to_string(&"42").unwrap(), "\"42\"\n");
+        assert_eq!(to_string(&"3.14").unwrap(), "\"3.14\"\n");
+        assert_eq!(to_string(&"0xFF").unwrap(), "\"0xFF\"\n");
     }
 
     #[test]
     fn test_string_escapes() {
-        assert_eq!(to_string(&"line\nbreak").unwrap(), r#""line\nbreak""#);
-        assert_eq!(to_string(&"say \"hi\"").unwrap(), r#""say \"hi\"""#);
-        assert_eq!(to_string(&"back\\slash").unwrap(), r#""back\\slash""#);
-        assert_eq!(to_string(&"\x00null").unwrap(), r#""\0null""#);
+        assert_eq!(to_string(&"line\nbreak").unwrap(), "\"line\\nbreak\"\n");
+        assert_eq!(to_string(&"say \"hi\"").unwrap(), "\"say \\\"hi\\\"\"\n");
+        assert_eq!(to_string(&"back\\slash").unwrap(), "\"back\\\\slash\"\n");
+        assert_eq!(to_string(&"\x00null").unwrap(), "\"\\0null\"\n");
     }
 
     #[test]
     fn test_string_indicator_chars() {
-        // Starts with indicator
-        assert_eq!(to_string(&"[array").unwrap(), r#""[array""#);
-        assert_eq!(to_string(&"{map").unwrap(), r#""{map""#);
-        assert_eq!(to_string(&"#comment").unwrap(), "\"#comment\"");
-
-        // Contains `: ` mid-string
-        assert_eq!(to_string(&"key: value").unwrap(), r#""key: value""#);
-
-        // Contains ` #` (comment)
-        assert_eq!(to_string(&"value #comment").unwrap(), r#""value #comment""#);
+        assert_eq!(to_string(&"[array").unwrap(), "\"[array\"\n");
+        assert_eq!(to_string(&"{map").unwrap(), "\"{map\"\n");
+        assert_eq!(to_string(&"#comment").unwrap(), "\"#comment\"\n");
+        assert_eq!(to_string(&"key: value").unwrap(), "\"key: value\"\n");
+        assert_eq!(
+            to_string(&"value #comment").unwrap(),
+            "\"value #comment\"\n"
+        );
     }
 
     #[test]
     fn test_string_leading_trailing_whitespace() {
-        assert_eq!(to_string(&" leading").unwrap(), r#"" leading""#);
-        assert_eq!(to_string(&"trailing ").unwrap(), r#""trailing ""#);
+        assert_eq!(to_string(&" leading").unwrap(), "\" leading\"\n");
+        assert_eq!(to_string(&"trailing ").unwrap(), "\"trailing \"\n");
     }
 
     #[test]
     fn test_null() {
-        assert_eq!(to_string::<()>(&()).unwrap(), "null");
+        assert_eq!(to_string::<()>(&()).unwrap(), "null\n");
     }
 
     #[test]
     fn test_option() {
-        assert_eq!(to_string(&None::<i32>).unwrap(), "null");
-        assert_eq!(to_string(&Some(42)).unwrap(), "42");
-        assert_eq!(to_string(&Some("hello")).unwrap(), "hello");
+        assert_eq!(to_string(&None::<i32>).unwrap(), "null\n");
+        assert_eq!(to_string(&Some(42)).unwrap(), "42\n");
+        assert_eq!(to_string(&Some("hello")).unwrap(), "hello\n");
     }
 
     #[test]
     fn test_newtype_struct() {
         #[derive(serde::Serialize)]
         struct Meters(f64);
-        assert_eq!(to_string(&Meters(3.5)).unwrap(), "3.5");
+        assert_eq!(to_string(&Meters(3.5)).unwrap(), "3.5\n");
     }
 
     #[test]
     fn test_unit_struct() {
         #[derive(serde::Serialize)]
         struct Marker;
-        assert_eq!(to_string(&Marker).unwrap(), "null");
+        assert_eq!(to_string(&Marker).unwrap(), "null\n");
     }
 
     #[test]
@@ -488,15 +749,15 @@ mod tests {
             Red,
             Green,
         }
-        assert_eq!(to_string(&Color::Red).unwrap(), "Red");
-        assert_eq!(to_string(&Color::Green).unwrap(), "Green");
+        assert_eq!(to_string(&Color::Red).unwrap(), "Red\n");
+        assert_eq!(to_string(&Color::Green).unwrap(), "Green\n");
     }
 
     #[test]
     fn test_char() {
-        assert_eq!(to_string(&'a').unwrap(), "a");
-        assert_eq!(to_string(&'\n').unwrap(), r#""\n""#);
-        assert_eq!(to_string(&'"').unwrap(), r#""\"""#);
+        assert_eq!(to_string(&'a').unwrap(), "a\n");
+        assert_eq!(to_string(&'\n').unwrap(), "\"\\n\"\n");
+        assert_eq!(to_string(&'"').unwrap(), "\"\\\"\"\n");
     }
 
     #[test]
@@ -504,20 +765,244 @@ mod tests {
         let bytes: &[u8] = &[1, 2, 3];
         assert_eq!(
             to_string(&serde_bytes::Bytes::new(bytes)).unwrap(),
-            "[1, 2, 3]"
+            "[1, 2, 3]\n"
         );
     }
 
     #[test]
     fn test_to_vec() {
         let v = to_vec(&42i32).unwrap();
-        assert_eq!(v, b"42");
+        assert_eq!(v, b"42\n");
     }
 
     #[test]
     fn test_to_writer() {
         let mut buf = Vec::new();
         to_writer(&mut buf, &"hello").unwrap();
-        assert_eq!(buf, b"hello");
+        assert_eq!(buf, b"hello\n");
+    }
+
+    // ── Collection tests ────────────────────────────────────────
+
+    #[test]
+    fn test_seq_integers() {
+        let v = vec![1, 2, 3];
+        assert_eq!(to_string(&v).unwrap(), "- 1\n- 2\n- 3\n");
+    }
+
+    #[test]
+    fn test_seq_strings() {
+        let v = vec!["hello", "world"];
+        assert_eq!(to_string(&v).unwrap(), "- hello\n- world\n");
+    }
+
+    #[test]
+    fn test_seq_empty() {
+        let v: Vec<i32> = vec![];
+        assert_eq!(to_string(&v).unwrap(), "[]\n");
+    }
+
+    #[test]
+    fn test_struct_simple() {
+        #[derive(serde::Serialize)]
+        struct Config {
+            name: String,
+            port: u16,
+        }
+        let c = Config {
+            name: "myapp".into(),
+            port: 8080,
+        };
+        assert_eq!(to_string(&c).unwrap(), "name: myapp\nport: 8080\n");
+    }
+
+    #[test]
+    fn test_struct_nested() {
+        #[derive(serde::Serialize)]
+        struct Outer {
+            inner: Inner,
+        }
+        #[derive(serde::Serialize)]
+        struct Inner {
+            value: i32,
+        }
+        let o = Outer {
+            inner: Inner { value: 42 },
+        };
+        assert_eq!(to_string(&o).unwrap(), "inner:\n  value: 42\n");
+    }
+
+    #[test]
+    fn test_struct_with_seq() {
+        #[derive(serde::Serialize)]
+        struct Config {
+            items: Vec<String>,
+        }
+        let c = Config {
+            items: vec!["alpha".into(), "beta".into()],
+        };
+        assert_eq!(to_string(&c).unwrap(), "items:\n- alpha\n- beta\n");
+    }
+
+    #[test]
+    fn test_struct_with_empty_seq() {
+        #[derive(serde::Serialize)]
+        struct Config {
+            items: Vec<String>,
+        }
+        let c = Config { items: vec![] };
+        assert_eq!(to_string(&c).unwrap(), "items: []\n");
+    }
+
+    #[test]
+    fn test_struct_with_empty_map() {
+        #[derive(serde::Serialize)]
+        struct Config {
+            tags: std::collections::BTreeMap<String, String>,
+        }
+        let c = Config {
+            tags: std::collections::BTreeMap::new(),
+        };
+        assert_eq!(to_string(&c).unwrap(), "tags: {}\n");
+    }
+
+    #[test]
+    fn test_seq_of_structs() {
+        #[derive(serde::Serialize)]
+        struct Item {
+            name: String,
+            qty: u32,
+        }
+        let items = vec![
+            Item {
+                name: "Widget".into(),
+                qty: 5,
+            },
+            Item {
+                name: "Gadget".into(),
+                qty: 3,
+            },
+        ];
+        assert_eq!(
+            to_string(&items).unwrap(),
+            "- name: Widget\n  qty: 5\n- name: Gadget\n  qty: 3\n"
+        );
+    }
+
+    #[test]
+    fn test_deeply_nested() {
+        #[derive(serde::Serialize)]
+        struct A {
+            b: B,
+        }
+        #[derive(serde::Serialize)]
+        struct B {
+            c: C,
+        }
+        #[derive(serde::Serialize)]
+        struct C {
+            value: i32,
+        }
+        let a = A {
+            b: B { c: C { value: 99 } },
+        };
+        assert_eq!(to_string(&a).unwrap(), "b:\n  c:\n    value: 99\n");
+    }
+
+    #[test]
+    fn test_map() {
+        let mut m = std::collections::BTreeMap::new();
+        m.insert("a", 1);
+        m.insert("b", 2);
+        assert_eq!(to_string(&m).unwrap(), "a: 1\nb: 2\n");
+    }
+
+    #[test]
+    fn test_tuple() {
+        let t = (42, "hello", true);
+        assert_eq!(to_string(&t).unwrap(), "- 42\n- hello\n- true\n");
+    }
+
+    #[test]
+    fn test_struct_mixed() {
+        #[derive(serde::Serialize)]
+        struct Config {
+            name: String,
+            debug: bool,
+            inner: Inner,
+            ports: Vec<u16>,
+        }
+        #[derive(serde::Serialize)]
+        struct Inner {
+            host: String,
+        }
+        let c = Config {
+            name: "app".into(),
+            debug: true,
+            inner: Inner {
+                host: "localhost".into(),
+            },
+            ports: vec![8080, 9090],
+        };
+        let expected = "\
+name: app
+debug: true
+inner:
+  host: localhost
+ports:
+- 8080
+- 9090
+";
+        assert_eq!(to_string(&c).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_nested_seq() {
+        let v = vec![vec![1, 2], vec![3, 4]];
+        let expected = "\
+- - 1
+  - 2
+- - 3
+  - 4
+";
+        assert_eq!(to_string(&v).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_seq_of_maps() {
+        let mut m1 = std::collections::BTreeMap::new();
+        m1.insert("x", 1);
+        m1.insert("y", 2);
+        let mut m2 = std::collections::BTreeMap::new();
+        m2.insert("x", 3);
+        m2.insert("y", 4);
+        let v = vec![m1, m2];
+        let expected = "\
+- x: 1
+  y: 2
+- x: 3
+  y: 4
+";
+        assert_eq!(to_string(&v).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_option_in_struct() {
+        #[derive(serde::Serialize)]
+        struct Config {
+            name: String,
+            label: Option<String>,
+        }
+        let c = Config {
+            name: "app".into(),
+            label: None,
+        };
+        assert_eq!(to_string(&c).unwrap(), "name: app\nlabel: null\n");
+
+        let c2 = Config {
+            name: "app".into(),
+            label: Some("prod".into()),
+        };
+        assert_eq!(to_string(&c2).unwrap(), "name: app\nlabel: prod\n");
     }
 }
