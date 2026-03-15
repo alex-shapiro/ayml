@@ -1,45 +1,8 @@
 //! Property-based tests for ayml-serde roundtrip and robustness.
 
-use ayml_serde::{from_str, to_string};
+use ayml_serde::{Value, from_str, to_string};
 use proptest::prelude::*;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-
-// ── Value type for roundtrip testing ─────────────────────────────
-
-/// A recursive value type that implements Serialize + Deserialize,
-/// covering all AYML scalar and collection types through serde.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-enum Value {
-    Null(()),
-    Bool(bool),
-    Int(i64),
-    Float(f64),
-    Str(String),
-    Seq(Vec<Value>),
-    Map(HashMap<String, Value>),
-}
-
-/// NaN-aware equality for Value trees.
-fn values_equal(a: &Value, b: &Value) -> bool {
-    match (a, b) {
-        (Value::Null(()), Value::Null(())) => true,
-        (Value::Bool(a), Value::Bool(b)) => a == b,
-        (Value::Int(a), Value::Int(b)) => a == b,
-        (Value::Float(a), Value::Float(b)) => (a.is_nan() && b.is_nan()) || a == b,
-        (Value::Str(a), Value::Str(b)) => a == b,
-        (Value::Seq(a), Value::Seq(b)) => {
-            a.len() == b.len() && a.iter().zip(b).all(|(a, b)| values_equal(a, b))
-        }
-        (Value::Map(a), Value::Map(b)) => {
-            a.len() == b.len()
-                && a.iter()
-                    .all(|(k, v)| b.get(k).is_some_and(|bv| values_equal(v, bv)))
-        }
-        _ => false,
-    }
-}
 
 // ── Generators ───────────────────────────────────────────────────
 
@@ -93,13 +56,8 @@ fn arb_value(depth: u32) -> impl Strategy<Value = Value> {
     let leaf = prop_oneof![
         Just(Value::Null(())),
         any::<bool>().prop_map(Value::Bool),
-        prop_oneof![
-            any::<i64>(),
-            Just(i64::MIN),
-            Just(i64::MAX),
-            Just(0_i64),
-        ]
-        .prop_map(Value::Int),
+        prop_oneof![any::<i64>(), Just(i64::MIN), Just(i64::MAX), Just(0_i64),]
+            .prop_map(Value::Int),
         // Finite, non-subnormal floats that roundtrip cleanly via ryu
         (-1e15_f64..1e15_f64)
             .prop_filter("finite and normal", |f| f.is_finite())
@@ -160,7 +118,7 @@ proptest! {
         })?;
 
         prop_assert!(
-            values_equal(&value, &deserialized),
+            value == deserialized,
             "values differ\n--- original ---\n{:?}\n--- serialized ---\n{}\n--- deserialized ---\n{:?}",
             value,
             serialized,

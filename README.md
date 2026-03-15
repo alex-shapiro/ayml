@@ -33,3 +33,30 @@ The design goals for AYML are, in decreasing priority:
 * directives
 * document prefixes
 * mult-document files
+
+## Implementation
+
+### Fuzzing
+
+The `ayml-serde` crate includes fuzz targets powered by [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz).
+
+```bash
+rustup toolchain install nightly
+cargo install cargo-fuzz
+cd ayml-serde/fuzz
+
+# Run the deserialize fuzzer (arbitrary bytes → from_slice)
+cargo +nightly fuzz run fuzz_deserialize
+
+# Run the roundtrip fuzzer (parse → serialize → parse, assert equality)
+cargo +nightly fuzz run fuzz_roundtrip
+
+# Limit to 5 minutes
+cargo +nightly fuzz run fuzz_deserialize -- -max_total_time=300
+```
+
+Crashes are saved to `fuzz/artifacts/<target>/`. Reproduce with:
+
+```bash
+cargo +nightly fuzz run fuzz_deserialize fuzz/artifacts/fuzz_deserialize/crash-<hash>
+```
