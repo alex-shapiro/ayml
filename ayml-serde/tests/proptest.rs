@@ -6,20 +6,62 @@ use std::collections::HashMap;
 
 // ── Generators ───────────────────────────────────────────────────
 
+/// Generate a random printable Unicode character, including non-ASCII.
+fn arb_unicode_char() -> impl Strategy<Value = char> {
+    // Sample from interesting Unicode ranges, excluding surrogates and
+    // non-characters.
+    prop_oneof![
+        // Basic Latin (ASCII printable)
+        (0x20_u32..=0x7E_u32),
+        // Latin-1 Supplement (accented characters, symbols)
+        (0xA0_u32..=0xFF_u32),
+        // Latin Extended-A (Ā-ſ)
+        (0x100_u32..=0x17F_u32),
+        // Greek and Coptic
+        (0x370_u32..=0x3FF_u32),
+        // Cyrillic
+        (0x400_u32..=0x4FF_u32),
+        // Arabic
+        (0x600_u32..=0x6FF_u32),
+        // Devanagari
+        (0x900_u32..=0x97F_u32),
+        // CJK Unified Ideographs (subset)
+        (0x4E00_u32..=0x9FFF_u32),
+        // Hiragana
+        (0x3040_u32..=0x309F_u32),
+        // Katakana
+        (0x30A0_u32..=0x30FF_u32),
+        // Hangul Syllables (subset)
+        (0xAC00_u32..=0xD7A3_u32),
+        // Emoji (Miscellaneous Symbols and Pictographs)
+        (0x1F300_u32..=0x1F5FF_u32),
+        // Emoticons
+        (0x1F600_u32..=0x1F64F_u32),
+    ]
+    .prop_filter_map("valid char", |cp| char::from_u32(cp))
+}
+
+/// Generate a random Unicode string of 1..=max_len printable characters.
+fn arb_unicode_string(max_len: usize) -> impl Strategy<Value = String> {
+    prop::collection::vec(arb_unicode_char(), 1..=max_len)
+        .prop_map(|chars| chars.into_iter().collect())
+}
+
 /// Map keys: valid AYML mapping keys that roundtrip through serde's
 /// HashMap<String, _>.
 fn arb_map_key() -> impl Strategy<Value = String> {
     prop_oneof![
-        "[a-zA-Z_][a-zA-Z0-9_]{0,15}",
+        2 => "[a-zA-Z_][a-zA-Z0-9_]{0,15}",
+        2 => arb_unicode_string(16),
         // Keys that need quoting
-        Just(String::new()),
-        Just("null".into()),
-        Just("true".into()),
-        Just("false".into()),
-        Just("42".into()),
-        Just("with: colon".into()),
-        Just("has #hash".into()),
-        Just("back\\slash".into()),
+        1 => Just(String::new()),
+        1 => Just("null".into()),
+        1 => Just("true".into()),
+        1 => Just("false".into()),
+        1 => Just("42".into()),
+        1 => Just("with: colon".into()),
+        1 => Just("has #hash".into()),
+        1 => Just("back\\slash".into()),
     ]
 }
 
@@ -27,27 +69,29 @@ fn arb_map_key() -> impl Strategy<Value = String> {
 fn arb_scalar_string() -> impl Strategy<Value = String> {
     prop_oneof![
         // Simple alphanumeric (bare strings)
-        "[a-zA-Z][a-zA-Z0-9 _-]{0,30}",
+        2 => "[a-zA-Z][a-zA-Z0-9 _-]{0,30}",
         // Strings containing special chars that force quoting
-        "[a-zA-Z0-9 :{}\\[\\]#,]{1,20}",
+        1 => "[a-zA-Z0-9 :{}\\[\\]#,]{1,20}",
+        // Random Unicode strings
+        3 => arb_unicode_string(30),
         // Empty string
-        Just(String::new()),
+        1 => Just(String::new()),
         // Reserved words
-        Just("null".into()),
-        Just("true".into()),
-        Just("false".into()),
-        Just("inf".into()),
-        Just("+inf".into()),
-        Just("-inf".into()),
-        Just("nan".into()),
+        1 => Just("null".into()),
+        1 => Just("true".into()),
+        1 => Just("false".into()),
+        1 => Just("inf".into()),
+        1 => Just("+inf".into()),
+        1 => Just("-inf".into()),
+        1 => Just("nan".into()),
         // Numeric-looking
-        Just("42".into()),
-        Just("3.25".into()),
-        Just("-7".into()),
+        1 => Just("42".into()),
+        1 => Just("3.25".into()),
+        1 => Just("-7".into()),
         // Strings with control characters (serializer escapes these)
-        Just("tab\there".into()),
-        Just("cr\rhere".into()),
-        Just("newline\nhere".into()),
+        1 => Just("tab\there".into()),
+        1 => Just("cr\rhere".into()),
+        1 => Just("newline\nhere".into()),
     ]
 }
 

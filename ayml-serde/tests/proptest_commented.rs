@@ -6,6 +6,32 @@ use std::collections::HashMap;
 
 // ── Generators ───────────────────────────────────────────────────
 
+/// Generate a random printable Unicode character, including non-ASCII.
+fn arb_unicode_char() -> impl Strategy<Value = char> {
+    prop_oneof![
+        (0x20_u32..=0x7E_u32),
+        (0xA0_u32..=0xFF_u32),
+        (0x100_u32..=0x17F_u32),
+        (0x370_u32..=0x3FF_u32),
+        (0x400_u32..=0x4FF_u32),
+        (0x600_u32..=0x6FF_u32),
+        (0x900_u32..=0x97F_u32),
+        (0x4E00_u32..=0x9FFF_u32),
+        (0x3040_u32..=0x309F_u32),
+        (0x30A0_u32..=0x30FF_u32),
+        (0xAC00_u32..=0xD7A3_u32),
+        (0x1F300_u32..=0x1F5FF_u32),
+        (0x1F600_u32..=0x1F64F_u32),
+    ]
+    .prop_filter_map("valid char", |cp| char::from_u32(cp))
+}
+
+/// Generate a random Unicode string of 1..=max_len printable characters.
+fn arb_unicode_string(max_len: usize) -> impl Strategy<Value = String> {
+    prop::collection::vec(arb_unicode_char(), 1..=max_len)
+        .prop_map(|chars| chars.into_iter().collect())
+}
+
 /// Comment text: at least one non-space char, no `#` or newlines.
 fn arb_comment_line() -> impl Strategy<Value = String> {
     "[a-zA-Z0-9_.,:;!?()-][a-zA-Z0-9 _.,:;!?()-]{0,39}"
@@ -30,24 +56,26 @@ fn arb_opt_top_comment() -> impl Strategy<Value = Option<String>> {
 
 fn arb_map_key() -> impl Strategy<Value = String> {
     prop_oneof![
-        "[a-zA-Z_][a-zA-Z0-9_]{0,15}",
-        Just(String::new()),
-        Just("null".into()),
-        Just("true".into()),
-        Just("false".into()),
-        Just("42".into()),
+        2 => "[a-zA-Z_][a-zA-Z0-9_]{0,15}",
+        2 => arb_unicode_string(16),
+        1 => Just(String::new()),
+        1 => Just("null".into()),
+        1 => Just("true".into()),
+        1 => Just("false".into()),
+        1 => Just("42".into()),
     ]
 }
 
 fn arb_scalar_string() -> impl Strategy<Value = String> {
     prop_oneof![
-        "[a-zA-Z][a-zA-Z0-9 _-]{0,30}",
-        Just(String::new()),
-        Just("null".into()),
-        Just("true".into()),
-        Just("false".into()),
-        Just("42".into()),
-        Just("3.25".into()),
+        2 => "[a-zA-Z][a-zA-Z0-9 _-]{0,30}",
+        3 => arb_unicode_string(30),
+        1 => Just(String::new()),
+        1 => Just("null".into()),
+        1 => Just("true".into()),
+        1 => Just("false".into()),
+        1 => Just("42".into()),
+        1 => Just("3.25".into()),
     ]
 }
 
