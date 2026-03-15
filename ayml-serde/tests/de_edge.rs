@@ -509,24 +509,14 @@ fn de_depth_limit_nested_enums() {
 }
 
 #[test]
-fn de_io_read_buffer_limit() {
-    // Simulate a reader that produces infinite input. Use a small max_buf
-    // (8 KiB) so the limit is hit almost instantly rather than requiring
-    // 256 MiB of iteration.
-    struct InfiniteReader;
-    impl std::io::Read for InfiniteReader {
-        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-            buf.fill(b' ');
-            Ok(buf.len())
-        }
-    }
-    let err = ayml_serde::from_reader_with_max_buf::<_, i32>(InfiniteReader, 8 * 1024);
+fn de_io_read_no_oom_on_whitespace() {
+    // IoRead no longer buffers the entire input, so an infinite stream of
+    // whitespace just parses until EOF or error without OOM.  We verify
+    // that parsing a finite but large whitespace-only input returns an
+    // appropriate error (unexpected end of input) rather than hanging.
+    let data = vec![b' '; 64 * 1024];
+    let err = ayml_serde::from_reader::<_, i32>(&data[..]);
     assert!(err.is_err());
-    let msg = err.unwrap_err().to_string();
-    assert!(
-        msg.contains("maximum size"),
-        "expected buffer limit error, got: {msg}"
-    );
 }
 
 #[test]

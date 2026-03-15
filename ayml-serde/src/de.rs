@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use serde::de::{self, DeserializeOwned, Visitor};
 
 use crate::error::{Error, Result};
-use crate::read::{IoRead, Read, StrRead};
+use crate::read::{IoRead, Read, SliceRead};
 
 /// Deserialize a `T` from a string of AYML text.
 ///
@@ -31,6 +31,7 @@ pub fn from_str<'a, T: serde::Deserialize<'a>>(s: &'a str) -> Result<T> {
 /// Returns an error if the input is not valid UTF-8, not valid AYML,
 /// or cannot be deserialized into `T`.
 pub fn from_slice<'a, T: serde::Deserialize<'a>>(bytes: &'a [u8]) -> Result<T> {
+    // Validate UTF-8 upfront — AYML is a text format.
     let s =
         std::str::from_utf8(bytes).map_err(|e| Error::Message(format!("invalid UTF-8: {e}")))?;
     from_str(s)
@@ -53,25 +54,6 @@ pub fn from_reader<R: std::io::Read, T: DeserializeOwned>(rdr: R) -> Result<T> {
     Ok(value)
 }
 
-/// Like [`from_reader`], but with a custom maximum input buffer size.
-///
-/// The default limit is 256 MiB. Pass a smaller value to reject input
-/// earlier, or a larger value to allow bigger documents.
-///
-/// # Errors
-///
-/// Returns an error if the input exceeds `max_buf` bytes, in addition
-/// to the same errors as [`from_reader`].
-pub fn from_reader_with_max_buf<R: std::io::Read, T: DeserializeOwned>(
-    rdr: R,
-    max_buf: usize,
-) -> Result<T> {
-    let mut de = Deserializer::from_reader_with_max_buf(rdr, max_buf);
-    let value = T::deserialize(&mut de)?;
-    de.end()?;
-    Ok(value)
-}
-
 // ── Parsing context ──────────────────────────────────────────────
 
 /// Block vs flow parsing context, mirroring ayml-core's grammar.
@@ -88,28 +70,28 @@ const MAX_DEPTH: usize = 64;
 
 pub(crate) struct Deserializer<R> {
     read: R,
-    /// Current parsing context — flow collections set this to Flow so
-    /// bare string scanning stops at `,`, `]`, `}`.
     ctx: Context,
-    /// Set to true when we're reading a mapping key, to prevent
-    /// `deserialize_any` from re-detecting the colon as a new mapping.
     reading_key: bool,
-    /// Buffered top comment (lines preceding a value), captured during
-    /// whitespace/comment skipping for `Commented<T>` support.
     pending_top_comment: Option<String>,
-    /// Current nesting depth (sequences + mappings).
     depth: usize,
+    scratch: Vec<u8>,
+    recording: Option<Vec<u8>>,
+    line: usize,
+    line_start: usize,
 }
 
-impl<'a> Deserializer<StrRead<'a>> {
+impl<'a> Deserializer<SliceRead<'a>> {
     fn from_str(s: &'a str) -> Self {
         Self {
-            read: StrRead::new(s),
+            read: SliceRead::new(s.as_bytes()),
             ctx: Context::Block,
-
             reading_key: false,
             pending_top_comment: None,
             depth: 0,
+            scratch: Vec::new(),
+            recording: None,
+            line: 1,
+            line_start: 0,
         }
     }
 }
@@ -119,57 +101,44 @@ impl<R: std::io::Read> Deserializer<IoRead<R>> {
         Self {
             read: IoRead::new(rdr),
             ctx: Context::Block,
-
             reading_key: false,
             pending_top_comment: None,
             depth: 0,
-        }
-    }
-
-    fn from_reader_with_max_buf(rdr: R, max_buf: usize) -> Self {
-        Self {
-            read: IoRead::with_max_buf(rdr, max_buf),
-            ctx: Context::Block,
-
-            reading_key: false,
-            pending_top_comment: None,
-            depth: 0,
+            scratch: Vec::new(),
+            recording: None,
+            line: 1,
+            line_start: 0,
         }
     }
 }
 
 // ── Character-level helpers ──────────────────────────────────────
 
-impl<'de, R: Read<'de>> Deserializer<R> {
-    fn peek(&mut self) -> Result<Option<char>> {
-        let off = self.read.offset();
-        self.read.fill_to(off + 4)?;
-        let input = self.read.input();
-        if off >= input.len() {
-            Ok(None)
-        } else {
-            Ok(input[off..].chars().next())
+impl<R: Read> Deserializer<R> {
+    /// Consume the next byte, recording it if recording is active.
+    fn next_byte(&mut self) -> Result<Option<u8>> {
+        let b = self.read.next()?;
+        if let Some(b) = b
+            && let Some(rec) = &mut self.recording
+        {
+            rec.push(b);
         }
+        Ok(b)
     }
 
-    fn peek_nth(&mut self, n: usize) -> Result<Option<char>> {
-        let off = self.read.offset();
-        self.read.fill_to(off + (n + 1) * 4)?;
-        let input = self.read.input();
-        if off >= input.len() {
-            Ok(None)
-        } else {
-            Ok(input[off..].chars().nth(n))
-        }
+    /// Peek at the next byte.
+    fn peek(&mut self) -> Result<Option<u8>> {
+        self.read.peek()
     }
 
-    fn advance(&mut self) -> Result<Option<char>> {
-        let ch = self.peek()?;
-        if let Some(c) = ch {
-            let off = self.read.offset();
-            self.read.set_offset(off + c.len_utf8());
-        }
-        Ok(ch)
+    /// Peek at byte n positions ahead.
+    fn peek_at(&mut self, n: usize) -> Result<Option<u8>> {
+        self.read.peek_at(n)
+    }
+
+    /// Consume the next byte (must have been peeked), recording if active.
+    fn advance(&mut self) -> Result<Option<u8>> {
+        self.next_byte()
     }
 
     fn is_eof(&mut self) -> Result<bool> {
@@ -178,53 +147,61 @@ impl<'de, R: Read<'de>> Deserializer<R> {
 
     fn is_break_or_eof(&mut self) -> Result<bool> {
         match self.peek()? {
-            None | Some('\n' | '\r') => Ok(true),
+            None | Some(b'\n' | b'\r') => Ok(true),
             _ => Ok(false),
         }
     }
 
     fn skip_inline_whitespace(&mut self) -> Result<()> {
-        while let Some(' ' | '\t') = self.peek()? {
+        while let Some(b' ' | b'\t') = self.peek()? {
             self.advance()?;
         }
         Ok(())
     }
 
-    fn rest_of_line(&mut self) -> Result<()> {
+    /// Read the rest of the line into a buffer.
+    fn rest_of_line_into(&mut self, buf: &mut Vec<u8>) -> Result<()> {
         loop {
             match self.peek()? {
-                Some('\n' | '\r') | None => break,
-                Some(_) => {
+                Some(b'\n' | b'\r') | None => break,
+                Some(b) => {
                     self.advance()?;
+                    buf.push(b);
                 }
             }
         }
         Ok(())
     }
 
+    /// Consume a line break (\n, \r, or \r\n). Returns true if consumed.
     fn eat_break(&mut self) -> Result<bool> {
         match self.peek()? {
-            Some('\r') => {
+            Some(b'\r') => {
                 self.advance()?;
-                if self.peek()? == Some('\n') {
+                self.line += 1;
+                if self.peek()? == Some(b'\n') {
                     self.advance()?;
                 }
+                self.line_start = self.read.byte_offset();
                 Ok(true)
             }
-            Some('\n') => {
+            Some(b'\n') => {
                 self.advance()?;
+                self.line += 1;
+                self.line_start = self.read.byte_offset();
                 Ok(true)
             }
             _ => Ok(false),
         }
     }
 
-    fn offset(&self) -> usize {
-        self.read.offset()
+    fn byte_offset(&self) -> usize {
+        self.read.byte_offset()
     }
 
-    fn set_offset(&mut self, offset: usize) {
-        self.read.set_offset(offset);
+    /// Current column (0-based indent) = distance from `line_start`.
+    fn current_indent(&self) -> usize {
+        self.read.byte_offset().saturating_sub(self.line_start)
     }
 
     // ── Depth tracking ────────────────────────────────────────────
@@ -245,13 +222,17 @@ impl<'de, R: Read<'de>> Deserializer<R> {
     // ── Error helpers ────────────────────────────────────────────
 
     fn error(&self, msg: &str) -> Error {
-        let (line, col) = line_col(self.read.input(), self.read.offset());
-        Error::Message(format!("{line}:{col}: {msg}"))
+        let col = self.read.byte_offset().saturating_sub(self.line_start) + 1;
+        Error::Message(format!("{}:{}: {}", self.line, col, msg))
     }
 
     fn error_at(&self, msg: &str, offset: usize) -> Error {
-        let (line, col) = line_col(self.read.input(), offset);
-        Error::Message(format!("{line}:{col}: {msg}"))
+        // For SliceRead we could compute exactly, but we keep it simple:
+        // use current line tracking which is close enough (same as serde_json).
+        // In practice error_at is called right after scanning, so line/col
+        // are very close.
+        let col = offset.saturating_sub(self.line_start) + 1;
+        Error::Message(format!("{}:{}: {}", self.line, col, msg))
     }
 
     fn end(&mut self) -> Result<()> {
@@ -267,10 +248,13 @@ impl<'de, R: Read<'de>> Deserializer<R> {
         let mut seen_comment = false;
         loop {
             match self.peek()? {
-                Some(' ' | '\t' | '\n' | '\r') => {
+                Some(b' ' | b'\t') => {
                     self.advance()?;
                 }
-                Some('#') => {
+                Some(b'\n' | b'\r') => {
+                    self.eat_break()?;
+                }
+                Some(b'#') => {
                     if !seen_comment {
                         self.pending_top_comment = None;
                         seen_comment = true;
@@ -288,20 +272,20 @@ impl<'de, R: Read<'de>> Deserializer<R> {
     fn capture_comment_line(&mut self) -> Result<()> {
         self.advance()?; // skip '#'
         // Skip optional space after '#'
-        if self.peek()? == Some(' ') {
+        if self.peek()? == Some(b' ') {
             self.advance()?;
         }
-        let start = self.offset();
-        self.rest_of_line()?;
-        let end = self.offset();
-        let text = &self.read.input()[start..end];
+        let mut buf = Vec::new();
+        self.rest_of_line_into(&mut buf)?;
+        let text = String::from_utf8(buf)
+            .map_err(|e| Error::Message(format!("invalid UTF-8 in comment: {e}")))?;
         match &mut self.pending_top_comment {
-            Some(buf) => {
-                buf.push('\n');
-                buf.push_str(text);
+            Some(existing) => {
+                existing.push('\n');
+                existing.push_str(&text);
             }
             None => {
-                self.pending_top_comment = Some(text.to_string());
+                self.pending_top_comment = Some(text);
             }
         }
         self.eat_break()?;
@@ -310,7 +294,7 @@ impl<'de, R: Read<'de>> Deserializer<R> {
 
     // ── Block-level helpers ────────────────────────────────────────
 
-    fn eat(&mut self, expected: char) -> Result<bool> {
+    fn eat(&mut self, expected: u8) -> Result<bool> {
         if self.peek()? == Some(expected) {
             self.advance()?;
             Ok(true)
@@ -319,21 +303,18 @@ impl<'de, R: Read<'de>> Deserializer<R> {
         }
     }
 
+    /// Count leading spaces without consuming them (uses `peek_at`).
     fn count_spaces(&mut self) -> Result<usize> {
-        let start_off = self.read.offset();
         let mut count = 0;
         loop {
-            self.read.fill_to(start_off + count + 1)?;
-            let input = self.read.input();
-            if start_off + count >= input.len() {
-                break;
-            }
-            match input.as_bytes()[start_off + count] {
-                b' ' => count += 1,
-                b'\t' => {
-                    return Err(
-                        self.error_at("tabs not allowed for indentation", start_off + count)
-                    );
+            match self.peek_at(count)? {
+                Some(b' ') => count += 1,
+                Some(b'\t') => {
+                    // Consume the spaces we counted, then error at the tab position
+                    for _ in 0..count {
+                        self.advance()?;
+                    }
+                    return Err(self.error("tabs not allowed for indentation"));
                 }
                 _ => break,
             }
@@ -341,147 +322,216 @@ impl<'de, R: Read<'de>> Deserializer<R> {
         Ok(count)
     }
 
+    /// Consume exactly `n` spaces. Returns false if not enough spaces.
     fn eat_spaces(&mut self, n: usize) -> Result<bool> {
         if n == 0 {
             return Ok(true);
         }
-        let off = self.read.offset();
-        self.read.fill_to(off + n)?;
-        let input = self.read.input();
-        if off + n > input.len() {
-            return Ok(false);
-        }
-        if input.as_bytes()[off..off + n].iter().all(|&b| b == b' ') {
-            self.set_offset(off + n);
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
-
-    fn current_indent(&self) -> usize {
-        let input = self.read.input();
-        let offset = self.read.offset();
-        if offset == 0 {
-            return 0;
-        }
-        let bytes = input.as_bytes();
-        for i in (0..offset).rev() {
-            if bytes[i] == b'\n' || bytes[i] == b'\r' {
-                return offset - i - 1;
+        for i in 0..n {
+            match self.peek_at(i)? {
+                Some(b' ') => {}
+                _ => return Ok(false),
             }
         }
-        offset
+        for _ in 0..n {
+            self.advance()?;
+        }
+        Ok(true)
     }
 
     fn skip_blank_lines(&mut self) -> Result<()> {
         loop {
-            let saved = self.offset();
-            self.skip_inline_whitespace()?;
-            if let Some('\n' | '\r') = self.peek()? {
-                self.eat_break()?;
-            } else {
-                self.set_offset(saved);
-                break;
+            // Peek ahead: is this line blank (only spaces/tabs then newline)?
+            let mut i = 0;
+            loop {
+                match self.peek_at(i)? {
+                    Some(b' ' | b'\t') => i += 1,
+                    Some(b'\n' | b'\r') => {
+                        // Blank line — consume everything including the break
+                        for _ in 0..i {
+                            self.advance()?;
+                        }
+                        self.eat_break()?;
+                        break;
+                    }
+                    _ => return Ok(()),
+                }
             }
         }
-        Ok(())
     }
 
     fn skip_block_gaps(&mut self) -> Result<()> {
         loop {
-            let saved = self.offset();
+            let saved_offset = self.byte_offset();
             self.skip_blank_lines()?;
-            // Skip comment lines
+            // Check for comment lines
             let spaces = self.count_spaces()?;
-            let off = self.offset() + spaces;
-            self.read.fill_to(off + 1)?;
-            let input = self.read.input();
-            if off < input.len() && input.as_bytes()[off] == b'#' {
-                self.set_offset(off);
+            if let Some(b'#') = self.peek_at(spaces)? {
+                // Consume the spaces and the comment
+                for _ in 0..spaces {
+                    self.advance()?;
+                }
                 self.capture_comment_line()?;
                 continue;
             }
-            if self.offset() == saved {
+            if self.byte_offset() == saved_offset {
                 break;
             }
         }
         Ok(())
     }
 
+    /// Skip from current position to the start of the next line.
+    /// Consumes inline whitespace, optional inline comment, and the line break.
+    /// If the newline was already consumed (by a nested value), this is a no-op.
+    /// Does NOT consume any indentation on the next line.
+    fn skip_to_next_line(&mut self) -> Result<()> {
+        // If we're already at a newline or BOL, just eat the break
+        if self.is_break_or_eof()? {
+            self.eat_break()?;
+            return Ok(());
+        }
+        // Peek to find out what's ahead: inline ws, then possible #comment, then break
+        // We need to consume everything up to and including the break.
+        // But if there's no break (nested value already consumed it), we stop.
+        let mut i = 0;
+        loop {
+            match self.peek_at(i)? {
+                Some(b' ' | b'\t') => i += 1,
+                Some(b'#') => {
+                    // Comment — find the end of line
+                    loop {
+                        i += 1;
+                        match self.peek_at(i)? {
+                            Some(b'\n' | b'\r') | None => break,
+                            _ => {}
+                        }
+                    }
+                    break;
+                }
+                Some(b'\n' | b'\r') => break,
+                None => return Ok(()), // EOF
+                _ => {
+                    // Non-whitespace, non-comment, non-break: the newline
+                    // was already consumed by a nested value. Don't consume.
+                    return Ok(());
+                }
+            }
+        }
+        // Consume everything we peeked past (inline ws + comment text)
+        for _ in 0..i {
+            self.advance()?;
+        }
+        // Consume the break
+        self.eat_break()?;
+        Ok(())
+    }
+
     fn is_mapping_value_indicator(&mut self) -> Result<bool> {
-        if self.peek()? != Some(':') {
+        if self.peek()? != Some(b':') {
             return Ok(false);
         }
-        let next = self.peek_nth(1)?;
+        let next = self.peek_at(1)?;
         Ok(next.is_none()
-            || next == Some(' ')
-            || next == Some('\t')
-            || next == Some('\n')
-            || next == Some('\r'))
+            || next == Some(b' ')
+            || next == Some(b'\t')
+            || next == Some(b'\n')
+            || next == Some(b'\r'))
     }
 
     // ── Scalar scanning ──────────────────────────────────────────
 
-    /// Scan a quoted string — either double-quoted (`"..."`) or
-    /// triple-quoted (`"""..."""`). Detects which form by lookahead.
     fn scan_quoted_string(&mut self) -> Result<String> {
-        // Check for triple-quote: `"""`  followed by a line break
-        if self.peek_nth(1)? == Some('"') && self.peek_nth(2)? == Some('"') {
-            let after = self.peek_nth(3)?;
-            if after == Some('\n') || after == Some('\r') || after.is_none() {
+        // Check for triple-quote
+        if self.peek_at(1)? == Some(b'"') && self.peek_at(2)? == Some(b'"') {
+            let after = self.peek_at(3)?;
+            if after == Some(b'\n') || after == Some(b'\r') || after.is_none() {
                 return self.scan_triple_quoted();
             }
         }
         self.scan_double_quoted()
     }
 
-    /// Scan a double-quoted string, returning the decoded content.
     fn scan_double_quoted(&mut self) -> Result<String> {
-        let start = self.offset();
+        let start_offset = self.byte_offset();
         self.advance()?; // opening `"`
-        let mut value = String::new();
+        self.scratch.clear();
 
         loop {
             match self.peek()? {
-                Some('"') => {
+                Some(b'"') => {
                     self.advance()?;
-                    return Ok(value);
+                    let s = String::from_utf8(std::mem::take(&mut self.scratch))
+                        .map_err(|e| Error::Message(format!("invalid UTF-8: {e}")))?;
+                    return Ok(s);
                 }
-                Some('\\') => {
+                Some(b'\\') => {
                     self.advance()?;
                     let ch = self.parse_escape()?;
-                    value.push(ch);
+                    let mut buf = [0u8; 4];
+                    let encoded = ch.encode_utf8(&mut buf);
+                    self.scratch.extend_from_slice(encoded.as_bytes());
                 }
-                Some(ch) if ch == '\n' || ch == '\r' => {
-                    return Err(self.error_at("expected closing `\"` before line break", start));
+                Some(b'\n' | b'\r') => {
+                    return Err(
+                        self.error_at("expected closing `\"` before line break", start_offset)
+                    );
                 }
-                Some(ch) => {
-                    if !is_printable(ch) {
+                Some(b) => {
+                    // Check for non-printable ASCII control chars
+                    if b < 0x20 && b != b'\t' {
                         return Err(
-                            self.error(&format!("non-printable character U+{:04X}", ch as u32))
+                            self.error(&format!("non-printable character U+{:04X}", u32::from(b)))
                         );
                     }
                     self.advance()?;
-                    value.push(ch);
+                    self.scratch.push(b);
+                    // If this is a multi-byte UTF-8 leading byte, read continuation bytes
+                    if b >= 0x80 {
+                        self.read_utf8_continuation(b)?;
+                    }
                 }
                 None => {
-                    return Err(self.error_at("unexpected end of input in string", start));
+                    return Err(self.error_at("unexpected end of input in string", start_offset));
                 }
             }
         }
     }
 
-    /// Scan a triple-quoted string (`"""..."""`).
-    ///
-    /// The opening `"""` must be followed by a line break. Content lines
-    /// are collected until a line containing only indentation + `"""` is
-    /// found. The closing `"""`'s indentation determines how many leading
-    /// spaces are stripped from each content line. Escape sequences are
-    /// processed. `\` at end-of-line is a line continuation.
+    /// After pushing a leading byte >= 0x80 to scratch, read and push
+    /// the expected number of continuation bytes.
+    fn read_utf8_continuation(&mut self, leading: u8) -> Result<()> {
+        let n = if leading & 0xE0 == 0xC0 {
+            1
+        } else if leading & 0xF0 == 0xE0 {
+            2
+        } else if leading & 0xF8 == 0xF0 {
+            3
+        } else {
+            return Err(self.error("invalid UTF-8 byte"));
+        };
+        for _ in 0..n {
+            match self.advance()? {
+                Some(b) if b & 0xC0 == 0x80 => {
+                    self.scratch.push(b);
+                }
+                _ => return Err(self.error("invalid UTF-8 continuation")),
+            }
+        }
+        // Validate the resulting character is printable
+        let start = self.scratch.len() - n - 1;
+        if let Ok(s) = std::str::from_utf8(&self.scratch[start..])
+            && let Some(ch) = s.chars().next()
+            && !is_printable(ch)
+        {
+            return Err(self.error(&format!("non-printable character U+{:04X}", ch as u32)));
+        }
+        Ok(())
+    }
+
     #[allow(clippy::too_many_lines)]
     fn scan_triple_quoted(&mut self) -> Result<String> {
-        let start = self.offset();
+        let start_offset = self.byte_offset();
         // Consume opening `"""`
         self.advance()?;
         self.advance()?;
@@ -489,7 +539,7 @@ impl<'de, R: Read<'de>> Deserializer<R> {
 
         // Must be followed by a line break
         if !self.eat_break()? {
-            return Err(self.error_at("expected line break after opening `\"\"\"`", start));
+            return Err(self.error_at("expected line break after opening `\"\"\"`", start_offset));
         }
 
         // Collect raw content lines until closing `"""`
@@ -498,40 +548,42 @@ impl<'de, R: Read<'de>> Deserializer<R> {
 
         loop {
             if self.is_eof()? {
-                return Err(self.error_at("unexpected end of input in triple-quoted string", start));
+                return Err(self.error_at(
+                    "unexpected end of input in triple-quoted string",
+                    start_offset,
+                ));
             }
 
-            // Count leading spaces
+            // Count leading spaces (without consuming)
             let spaces = self.count_spaces()?;
 
             // Check if this line is the closing `"""`
-            let off = self.offset() + spaces;
-            self.read.fill_to(off + 3)?;
-            let input = self.read.input();
-            if input[off..].starts_with("\"\"\"") {
-                // Verify it's followed by end-of-line, whitespace, comment, or EOF
-                let after_close = &input[off + 3..];
-                if after_close.is_empty()
-                    || after_close.starts_with('\n')
-                    || after_close.starts_with('\r')
-                    || after_close.starts_with(' ')
-                    || after_close.starts_with('\t')
-                    || after_close.starts_with('#')
+            if self.peek_at(spaces)? == Some(b'"')
+                && self.peek_at(spaces + 1)? == Some(b'"')
+                && self.peek_at(spaces + 2)? == Some(b'"')
+            {
+                let after = self.peek_at(spaces + 3)?;
+                if after.is_none()
+                    || after == Some(b'\n')
+                    || after == Some(b'\r')
+                    || after == Some(b' ')
+                    || after == Some(b'\t')
+                    || after == Some(b'#')
                 {
                     closing_indent = spaces;
-                    self.set_offset(off + 3);
+                    // Consume spaces + `"""`
+                    for _ in 0..spaces + 3 {
+                        self.advance()?;
+                    }
                     break;
                 }
             }
 
-            // Content line: read to end of line
-            let line_start = self.offset();
-            self.read.fill_to(line_start + spaces)?;
-            // Don't advance past spaces yet — collect the whole raw line
-            let line_off = self.offset();
-            self.rest_of_line()?;
-            let line_end = self.offset();
-            let line = self.read.input()[line_off..line_end].to_string();
+            // Content line: read entire raw line (including leading spaces)
+            let mut line_buf = Vec::new();
+            self.rest_of_line_into(&mut line_buf)?;
+            let line = String::from_utf8(line_buf)
+                .map_err(|e| Error::Message(format!("invalid UTF-8: {e}")))?;
             raw_lines.push(line);
 
             if !self.eat_break()? && !self.is_eof()? {
@@ -540,18 +592,14 @@ impl<'de, R: Read<'de>> Deserializer<R> {
         }
 
         // Process: strip indentation, handle escapes, line continuations.
-        // Track positions where `\` at end-of-line creates a continuation
-        // (suppresses the following newline). We avoid using a sentinel
-        // character because `\0` is a valid escape that could collide.
         let mut result = String::new();
-        let mut continuation = false; // true if previous line ended with `\`
+        let mut continuation = false;
         for (i, line) in raw_lines.iter().enumerate() {
             if i > 0 && !continuation {
                 result.push('\n');
             }
             continuation = false;
 
-            // Strip leading indentation (closing_indent spaces)
             let stripped = if line.len() >= closing_indent
                 && line.as_bytes()[..closing_indent].iter().all(|&b| b == b' ')
             {
@@ -562,7 +610,6 @@ impl<'de, R: Read<'de>> Deserializer<R> {
                 line.as_str()
             };
 
-            // Process escape sequences
             let mut chars = stripped.chars().peekable();
             while let Some(ch) = chars.next() {
                 if ch == '\\' {
@@ -571,7 +618,7 @@ impl<'de, R: Read<'de>> Deserializer<R> {
                         continue;
                     }
                     let decoded = decode_escape_char(&mut chars)
-                        .map_err(|msg| self.error_at(&msg, start))?;
+                        .map_err(|msg| self.error_at(&msg, start_offset))?;
                     result.push(decoded);
                 } else {
                     result.push(ch);
@@ -584,36 +631,39 @@ impl<'de, R: Read<'de>> Deserializer<R> {
 
     /// Parse a double-quoted escape sequence (after consuming the `\`).
     fn parse_escape(&mut self) -> Result<char> {
-        let esc_start = self.offset().saturating_sub(1);
+        let esc_start = self.byte_offset().saturating_sub(1);
         match self.advance()? {
-            Some('0') => Ok('\0'),
-            Some('a') => Ok('\x07'),
-            Some('b') => Ok('\x08'),
-            Some('t') => Ok('\t'),
-            Some('n') => Ok('\n'),
-            Some('v') => Ok('\x0B'),
-            Some('f') => Ok('\x0C'),
-            Some('r') => Ok('\r'),
-            Some('e') => Ok('\x1B'),
-            Some(' ') => Ok(' '),
-            Some('"') => Ok('"'),
-            Some('/') => Ok('/'),
-            Some('\\') => Ok('\\'),
-            Some('x') => self.parse_hex_escape(2),
-            Some('u') => self.parse_hex_escape(4),
-            Some('U') => self.parse_hex_escape(8),
-            Some(ch) => Err(self.error_at(&format!("invalid escape: \\{ch}"), esc_start)),
+            Some(b'0') => Ok('\0'),
+            Some(b'a') => Ok('\x07'),
+            Some(b'b') => Ok('\x08'),
+            Some(b't') => Ok('\t'),
+            Some(b'n') => Ok('\n'),
+            Some(b'v') => Ok('\x0B'),
+            Some(b'f') => Ok('\x0C'),
+            Some(b'r') => Ok('\r'),
+            Some(b'e') => Ok('\x1B'),
+            Some(b' ') => Ok(' '),
+            Some(b'"') => Ok('"'),
+            Some(b'/') => Ok('/'),
+            Some(b'\\') => Ok('\\'),
+            Some(b'x') => self.parse_hex_escape(2),
+            Some(b'u') => self.parse_hex_escape(4),
+            Some(b'U') => self.parse_hex_escape(8),
+            Some(b) => {
+                let ch = b as char;
+                Err(self.error_at(&format!("invalid escape: \\{ch}"), esc_start))
+            }
             None => Err(self.error_at("unexpected end of input in escape", esc_start)),
         }
     }
 
     fn parse_hex_escape(&mut self, digits: usize) -> Result<char> {
-        let start = self.offset();
+        let start = self.byte_offset();
         let mut value: u32 = 0;
         for _ in 0..digits {
             match self.advance()? {
-                Some(ch) if ch.is_ascii_hexdigit() => {
-                    value = value * 16 + ch.to_digit(16).unwrap();
+                Some(b) if (b as char).is_ascii_hexdigit() => {
+                    value = value * 16 + (b as char).to_digit(16).unwrap();
                 }
                 _ => {
                     return Err(self.error_at(&format!("expected {digits} hex digits"), start));
@@ -625,28 +675,34 @@ impl<'de, R: Read<'de>> Deserializer<R> {
         })
     }
 
-    /// Scan a bare (unquoted) scalar string in the given context.
-    /// Returns the raw text without type resolution.
+    /// Scan a bare (unquoted) scalar string.
     fn scan_bare_string(&mut self, ctx: Context) -> Result<String> {
-        let start = self.offset();
+        self.scratch.clear();
 
         // ns-plain-first-char: `-` and `:` require a following ns-char
         match self.peek()? {
-            Some('-' | ':') => {
-                let next = self.peek_nth(1)?;
+            Some(b'-' | b':') => {
+                let next = self.peek_at(1)?;
                 match next {
-                    Some(c) if !c.is_ascii_whitespace() && is_printable(c) => {
-                        self.advance()?;
+                    Some(b) if !is_ascii_whitespace(b) && is_printable_byte_start(b) => {
+                        let b0 = self.advance()?.unwrap();
+                        self.scratch.push(b0);
                     }
                     _ => {
                         return Err(self.error("unexpected character"));
                     }
                 }
             }
-            Some(ch) if is_plain_first(ch) => {
+            Some(b) if is_plain_first_byte(b) => {
                 self.advance()?;
+                self.scratch.push(b);
+                if b >= 0x80 {
+                    self.read_utf8_continuation(b)?;
+                }
             }
-            Some(ch) => {
+            Some(b) => {
+                // Try to decode as UTF-8 char for error message
+                let ch = if b < 0x80 { b as char } else { '?' };
                 return Err(self.error(&format!("unexpected character `{ch}`")));
             }
             None => {
@@ -655,62 +711,82 @@ impl<'de, R: Read<'de>> Deserializer<R> {
         }
 
         loop {
-            let ws_start = self.offset();
-            self.skip_inline_whitespace()?;
-            let ws_end = self.offset();
+            // Track where trailing whitespace starts in scratch
+            let ws_mark = self.scratch.len();
+
+            // Accumulate inline whitespace into scratch
+            while let Some(b' ' | b'\t') = self.peek()? {
+                let b = self.advance()?.unwrap();
+                self.scratch.push(b);
+            }
 
             if self.is_break_or_eof()? {
-                return Ok(self.read.input()[start..ws_start].to_string());
+                self.scratch.truncate(ws_mark);
+                let s = String::from_utf8(std::mem::take(&mut self.scratch))
+                    .map_err(|e| Error::Message(format!("invalid UTF-8: {e}")))?;
+                return Ok(s);
             }
 
             match self.peek()? {
-                Some('#') => {
-                    // '#' is not allowed in bare strings; terminate here
-                    if ws_end > ws_start {
-                        self.set_offset(ws_start);
-                    }
-                    return Ok(self.read.input()[start..self.offset()].to_string());
+                Some(b'#') => {
+                    // '#' terminates bare strings; drop trailing ws
+                    self.scratch.truncate(ws_mark);
+                    let s = String::from_utf8(std::mem::take(&mut self.scratch))
+                        .map_err(|e| Error::Message(format!("invalid UTF-8: {e}")))?;
+                    return Ok(s);
                 }
-                Some(':') => {
-                    let next = self.peek_nth(1)?;
+                Some(b':') => {
+                    let next = self.peek_at(1)?;
                     if next.is_none()
-                        || next == Some(' ')
-                        || next == Some('\t')
-                        || next == Some('\n')
-                        || next == Some('\r')
+                        || next == Some(b' ')
+                        || next == Some(b'\t')
+                        || next == Some(b'\n')
+                        || next == Some(b'\r')
                     {
-                        if ws_end > ws_start {
-                            self.set_offset(ws_start);
-                        }
-                        return Ok(self.read.input()[start..ws_start].to_string());
+                        // Mapping value indicator — drop trailing ws
+                        self.scratch.truncate(ws_mark);
+                        let s = String::from_utf8(std::mem::take(&mut self.scratch))
+                            .map_err(|e| Error::Message(format!("invalid UTF-8: {e}")))?;
+                        return Ok(s);
                     }
                     self.advance()?;
+                    self.scratch.push(b':');
                 }
-                Some(',' | ']' | '}') if ctx == Context::Flow => {
-                    return Ok(self.read.input()[start..ws_start].to_string());
+                Some(b',' | b']' | b'}') if ctx == Context::Flow => {
+                    self.scratch.truncate(ws_mark);
+                    let s = String::from_utf8(std::mem::take(&mut self.scratch))
+                        .map_err(|e| Error::Message(format!("invalid UTF-8: {e}")))?;
+                    return Ok(s);
                 }
-                Some(ch) if !is_printable(ch) => {
-                    return Err(self.error(&format!("non-printable character U+{:04X}", ch as u32)));
+                Some(b) if b < 0x20 && b != b'\t' => {
+                    return Err(
+                        self.error(&format!("non-printable character U+{:04X}", u32::from(b)))
+                    );
                 }
-                Some(_) => {
+                Some(b) => {
                     self.advance()?;
+                    self.scratch.push(b);
+                    if b >= 0x80 {
+                        self.read_utf8_continuation(b)?;
+                    }
                 }
                 None => {
-                    return Ok(self.read.input()[start..ws_start].to_string());
+                    self.scratch.truncate(ws_mark);
+                    let s = String::from_utf8(std::mem::take(&mut self.scratch))
+                        .map_err(|e| Error::Message(format!("invalid UTF-8: {e}")))?;
+                    return Ok(s);
                 }
             }
         }
     }
 
-    /// Scan the next scalar value as a string (quoted or bare).
     fn scan_scalar_string(&mut self, ctx: Context) -> Result<String> {
         match self.peek()? {
-            Some('"') => self.scan_quoted_string(),
+            Some(b'"') => self.scan_quoted_string(),
             _ => self.scan_bare_string(ctx),
         }
     }
 
-    /// Parse a bare string as a bool, or return an error.
     fn parse_bool(&mut self) -> Result<bool> {
         let text = self.scan_bare_string(self.ctx)?;
         match text.as_str() {
@@ -720,23 +796,20 @@ impl<'de, R: Read<'de>> Deserializer<R> {
         }
     }
 
-    /// Parse a bare string as an integer in the requested type.
     fn parse_int<T: TryFrom<i64>>(&mut self) -> Result<T>
     where
         T::Error: std::fmt::Display,
     {
-        let start = self.offset();
+        let start = self.byte_offset();
         let text = self.scan_bare_string(self.ctx)?;
         let i = try_parse_int(&text).map_err(|()| self.error_at("integer overflow", start))?;
         let i = i.ok_or_else(|| self.error(&format!("expected integer, got `{text}`")))?;
         T::try_from(i).map_err(|e| self.error(&format!("integer out of range: {e}")))
     }
 
-    /// Parse a bare string as a float in the requested type.
-    fn parse_float<V: Visitor<'de>>(&mut self, visitor: V) -> Result<V::Value> {
+    fn parse_float<'de, V: Visitor<'de>>(&mut self, visitor: V) -> Result<V::Value> {
         let text = self.scan_bare_string(self.ctx)?;
         if let Some(f) = try_parse_float(&text) {
-            // Also accept integer-shaped text as float
             visitor.visit_f64(f)
         } else if let Ok(Some(i)) = try_parse_int(&text) {
             #[allow(clippy::cast_precision_loss)]
@@ -746,75 +819,92 @@ impl<'de, R: Read<'de>> Deserializer<R> {
         }
     }
 
-    /// Handle `Commented<T>` deserialization: present a virtual map with
-    /// `__top_comment__`, `__value__`, and `__inline_comment__` entries.
-    fn deserialize_commented<V: de::Visitor<'de>>(&mut self, visitor: V) -> Result<V::Value> {
-        // Skip whitespace/comments so that a top comment indented under the
-        // key (e.g. after "key:\n  # comment\n  value") is captured before
-        // we take the pending comment.
+    fn deserialize_commented<'de, V: de::Visitor<'de>>(&mut self, visitor: V) -> Result<V::Value> {
         self.skip_whitespace_and_comments()?;
         let top_comment = self.pending_top_comment.take();
-        let offset = self.offset();
+        let saved_line = self.line;
         visitor.visit_map(CommentedAccess {
             de: self,
             top_comment,
             state: CommentedState::TopComment,
-            value_start: offset,
+            value_start_line: saved_line,
         })
     }
 
-    /// After value deserialization, try to capture a trailing inline comment.
     fn capture_inline_comment(&mut self) -> Result<Option<String>> {
         self.skip_inline_whitespace()?;
-        if self.peek()? == Some('#') {
+        if self.peek()? == Some(b'#') {
             self.advance()?; // skip '#'
-            if self.peek()? == Some(' ') {
+            if self.peek()? == Some(b' ') {
                 self.advance()?; // skip space
             }
-            let start = self.offset();
-            self.rest_of_line()?;
-            let end = self.offset();
-            let text = self.read.input()[start..end].to_string();
+            let mut buf = Vec::new();
+            self.rest_of_line_into(&mut buf)?;
+            let text = String::from_utf8(buf)
+                .map_err(|e| Error::Message(format!("invalid UTF-8 in comment: {e}")))?;
             Ok(Some(text))
         } else {
             Ok(None)
         }
     }
+
+    /// Start recording bytes consumed via `next_byte`.
+    fn start_recording(&mut self) {
+        self.recording = Some(Vec::new());
+    }
+
+    /// Stop recording and return the recorded bytes as a String.
+    fn stop_recording(&mut self) -> String {
+        let bytes = self.recording.take().unwrap_or_default();
+        String::from_utf8(bytes).unwrap_or_default()
+    }
+
+    /// Check if the upcoming bytes spell "null" followed by a terminator.
+    fn is_null_ahead(&mut self) -> Result<bool> {
+        Ok(self.peek_at(0)? == Some(b'n')
+            && self.peek_at(1)? == Some(b'u')
+            && self.peek_at(2)? == Some(b'l')
+            && self.peek_at(3)? == Some(b'l')
+            && matches!(
+                self.peek_at(4)?,
+                None | Some(b' ' | b'\t' | b'\n' | b'\r' | b'#' | b',' | b']' | b'}')
+            ))
+    }
 }
 
-impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
+impl<'de, R: Read> de::Deserializer<'de> for &mut Deserializer<R> {
     type Error = Error;
 
+    #[allow(clippy::too_many_lines)]
     fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         self.skip_whitespace_and_comments()?;
         match self.peek()? {
-            Some('"') => {
-                let start = self.offset();
+            Some(b'"') => {
+                let start_indent = self.current_indent();
+                let start_offset = self.byte_offset();
+                self.start_recording();
                 let s = self.scan_quoted_string()?;
-                let after_key = self.offset();
-                // Check if this is a mapping key (but not if we're already reading a key,
-                // and not in flow context where maps use explicit `{}`).
+                let raw = self.stop_recording();
                 if !self.reading_key && self.ctx == Context::Block {
                     self.skip_inline_whitespace()?;
                     if self.is_mapping_value_indicator()? {
                         self.advance()?; // consume ':'
                         self.skip_inline_whitespace()?;
-                        let indent = indent_at(self.read.input(), start);
-                        let raw = self.read.input()[start..after_key].to_string();
                         self.enter_collection()?;
                         let key = PrescannedKey { value: s, raw };
                         let value = visitor.visit_map(MapAccess::with_prescanned_key(
                             self,
-                            MapStyle::Block(indent),
+                            MapStyle::Block(start_indent),
                             key,
                         ));
                         self.leave_collection();
                         return value;
                     }
                 }
+                let _ = start_offset;
                 visitor.visit_string(s)
             }
-            Some('[') => {
+            Some(b'[') => {
                 self.advance()?;
                 let prev_ctx = self.ctx;
                 self.enter_collection()?;
@@ -823,12 +913,12 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
                 self.ctx = prev_ctx;
                 let value = result?;
                 self.skip_whitespace_and_comments()?;
-                if !self.eat(']')? {
+                if !self.eat(b']')? {
                     return Err(self.error("expected `]` to close sequence"));
                 }
                 Ok(value)
             }
-            Some('{') => {
+            Some(b'{') => {
                 self.advance()?;
                 let prev_ctx = self.ctx;
                 self.enter_collection()?;
@@ -837,12 +927,12 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
                 self.ctx = prev_ctx;
                 let value = result?;
                 self.skip_whitespace_and_comments()?;
-                if !self.eat('}')? {
+                if !self.eat(b'}')? {
                     return Err(self.error("expected `}` to close mapping"));
                 }
                 Ok(value)
             }
-            Some('-') if self.ctx == Context::Block && self.peek_nth(1)? == Some(' ') => {
+            Some(b'-') if self.ctx == Context::Block && self.peek_at(1)? == Some(b' ') => {
                 let indent = self.current_indent();
                 self.enter_collection()?;
                 let value = visitor.visit_seq(SeqAccess::new(self, SeqStyle::Block(indent)));
@@ -850,38 +940,34 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
                 value
             }
             Some(_) => {
-                // Bare scalar — but check if it's a mapping key first
-                // (skip this check if we're already reading a key, and not
-                // in flow context where maps use explicit `{}`).
-                let start = self.offset();
+                let start_indent = self.current_indent();
+                let start_offset = self.byte_offset();
+                self.start_recording();
                 let text = self.scan_bare_string(self.ctx)?;
-                let after_key = self.offset();
+                let raw = self.stop_recording();
                 if !self.reading_key && self.ctx == Context::Block {
                     self.skip_inline_whitespace()?;
                     if self.is_mapping_value_indicator()? {
                         self.advance()?; // consume ':'
                         self.skip_inline_whitespace()?;
-                        let indent = indent_at(self.read.input(), start);
-                        let raw = self.read.input()[start..after_key].to_string();
                         self.enter_collection()?;
                         let key = PrescannedKey { value: text, raw };
                         let value = visitor.visit_map(MapAccess::with_prescanned_key(
                             self,
-                            MapStyle::Block(indent),
+                            MapStyle::Block(start_indent),
                             key,
                         ));
                         self.leave_collection();
                         return value;
                     }
                 }
-                // Resolve scalar type
                 match text.as_str() {
                     "null" => visitor.visit_unit(),
                     "true" => visitor.visit_bool(true),
                     "false" => visitor.visit_bool(false),
                     _ => match try_parse_int(&text) {
                         Ok(Some(i)) => visitor.visit_i64(i),
-                        Err(()) => Err(self.error_at("integer overflow", start)),
+                        Err(()) => Err(self.error_at("integer overflow", start_offset)),
                         Ok(None) => {
                             if let Some(f) = try_parse_float(&text) {
                                 visitor.visit_f64(f)
@@ -938,8 +1024,7 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
 
     fn deserialize_u64<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         self.skip_whitespace_and_comments()?;
-        // i64 can't represent all u64 values, so parse directly
-        let start = self.offset();
+        let start = self.byte_offset();
         let text = self.scan_bare_string(self.ctx)?;
         let val: u64 = parse_unsigned(&text).ok_or_else(|| {
             self.error_at(&format!("expected unsigned integer, got `{text}`"), start)
@@ -992,28 +1077,12 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
 
     fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         self.skip_whitespace_and_comments()?;
-        // Peek at whether this is `null`
-        let off = self.offset();
-        self.read.fill_to(off + 5)?;
-        let is_null = {
-            let input = self.read.input();
-            if input[off..].starts_with("null") {
-                let after = &input.as_bytes()[off + 4..];
-                after.is_empty()
-                    || after[0] == b' '
-                    || after[0] == b'\t'
-                    || after[0] == b'\n'
-                    || after[0] == b'\r'
-                    || after[0] == b'#'
-                    || after[0] == b','
-                    || after[0] == b']'
-                    || after[0] == b'}'
-            } else {
-                false
-            }
-        };
-        if is_null {
-            self.set_offset(off + 4);
+        if self.is_null_ahead()? {
+            // Consume "null"
+            self.advance()?;
+            self.advance()?;
+            self.advance()?;
+            self.advance()?;
             return visitor.visit_none();
         }
         visitor.visit_some(self)
@@ -1049,7 +1118,7 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
         self.skip_whitespace_and_comments()?;
         self.enter_collection()?;
         match self.peek()? {
-            Some('[') => {
+            Some(b'[') => {
                 self.advance()?;
                 let prev_ctx = self.ctx;
                 let result = visitor.visit_seq(SeqAccess::new(self, SeqStyle::Flow));
@@ -1057,12 +1126,12 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
                 self.ctx = prev_ctx;
                 let value = result?;
                 self.skip_whitespace_and_comments()?;
-                if !self.eat(']')? {
+                if !self.eat(b']')? {
                     return Err(self.error("expected `]` to close sequence"));
                 }
                 Ok(value)
             }
-            Some('-') if self.peek_nth(1)? == Some(' ') => {
+            Some(b'-') if self.peek_at(1)? == Some(b' ') => {
                 let indent = self.current_indent();
                 let value = visitor.visit_seq(SeqAccess::new(self, SeqStyle::Block(indent)));
                 self.leave_collection();
@@ -1091,7 +1160,7 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
     fn deserialize_map<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         self.skip_whitespace_and_comments()?;
         self.enter_collection()?;
-        if let Some('{') = self.peek()? {
+        if let Some(b'{') = self.peek()? {
             self.advance()?;
             let prev_ctx = self.ctx;
             let result = visitor.visit_map(MapAccess::new(self, MapStyle::Flow));
@@ -1099,7 +1168,7 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
             self.ctx = prev_ctx;
             let value = result?;
             self.skip_whitespace_and_comments()?;
-            if !self.eat('}')? {
+            if !self.eat(b'}')? {
                 return Err(self.error("expected `}` to close mapping"));
             }
             Ok(value)
@@ -1130,9 +1199,8 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
         visitor: V,
     ) -> Result<V::Value> {
         self.skip_whitespace_and_comments()?;
-        if let Some('{') = self.peek()? {
-            // Flow mapping: {VariantName: value}
-            self.advance()?; // eat '{'
+        if let Some(b'{') = self.peek()? {
+            self.advance()?;
             let prev_ctx = self.ctx;
             self.ctx = Context::Flow;
             self.enter_collection()?;
@@ -1146,18 +1214,14 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
             self.ctx = prev_ctx;
             let value = result?;
             self.skip_whitespace_and_comments()?;
-            if !self.eat('}')? {
+            if !self.eat(b'}')? {
                 return Err(self.error("expected `}` to close enum mapping"));
             }
             Ok(value)
         } else {
-            // Could be a unit variant (bare string) or block mapping (key: value).
-            // Lookahead: scan the key, check for `: `.
-            let start = self.offset();
             let text = self.scan_scalar_string(self.ctx)?;
             self.skip_inline_whitespace()?;
             if self.is_mapping_value_indicator()? {
-                // Block mapping style: VariantName: value
                 self.advance()?; // consume ':'
                 self.skip_inline_whitespace()?;
                 self.enter_collection()?;
@@ -1169,7 +1233,6 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
                 self.leave_collection();
                 value
             } else {
-                // Unit variant: just a bare string
                 visitor.visit_enum(EnumAccess {
                     de: self,
                     style: EnumStyle::Unit,
@@ -1211,7 +1274,7 @@ impl<'a, R> SeqAccess<'a, R> {
     }
 }
 
-impl<'de, R: Read<'de>> de::SeqAccess<'de> for SeqAccess<'_, R> {
+impl<'de, R: Read> de::SeqAccess<'de> for SeqAccess<'_, R> {
     type Error = Error;
 
     fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>>
@@ -1222,15 +1285,15 @@ impl<'de, R: Read<'de>> de::SeqAccess<'de> for SeqAccess<'_, R> {
             SeqStyle::Flow => {
                 self.de.ctx = Context::Flow;
                 self.de.skip_whitespace_and_comments()?;
-                if self.de.peek()? == Some(']') {
+                if self.de.peek()? == Some(b']') {
                     return Ok(None);
                 }
                 if !self.first {
-                    if !self.de.eat(',')? {
+                    if !self.de.eat(b',')? {
                         return Err(self.de.error("expected `,` or `]`"));
                     }
                     self.de.skip_whitespace_and_comments()?;
-                    if self.de.peek()? == Some(']') {
+                    if self.de.peek()? == Some(b']') {
                         return Ok(None); // trailing comma
                     }
                 }
@@ -1241,8 +1304,7 @@ impl<'de, R: Read<'de>> de::SeqAccess<'de> for SeqAccess<'_, R> {
                 let indent = *indent;
                 if self.first {
                     self.first = false;
-                    // Indent already consumed by deserialize_seq; consume `- `
-                    if !self.de.eat('-')? || self.de.peek()? != Some(' ') {
+                    if !self.de.eat(b'-')? || self.de.peek()? != Some(b' ') {
                         return Err(self.de.error("expected `- `"));
                     }
                     self.de.advance()?; // eat space
@@ -1250,29 +1312,8 @@ impl<'de, R: Read<'de>> de::SeqAccess<'de> for SeqAccess<'_, R> {
                 }
 
                 // Between entries: finish current line, move to next.
-                // A nested block value may have already consumed the newline,
-                // leaving us at the start of a new line. Save position so we
-                // can restore if we mistakenly consume indentation as inline
-                // whitespace.
-                //
-                // Note: we do NOT clear pending_top_comment here. A comment
-                // between entries in a nested block value (e.g. a struct
-                // inside this seq) may have already been captured by
-                // skip_block_gaps during the nested value's between-entries
-                // processing. That comment belongs to the next seq element.
-                let saved = self.de.offset();
-                if !self.de.is_break_or_eof()? {
-                    self.de.skip_inline_whitespace()?;
-                    if self.de.peek()? == Some('#') {
-                        self.de.rest_of_line()?;
-                    }
-                }
-                if !self.de.is_eof()? && !self.de.eat_break()? {
-                    // No break found — newline was already consumed by
-                    // a nested value. Restore position so indentation
-                    // is preserved for count_spaces below.
-                    self.de.set_offset(saved);
-                }
+                // Use peek-based approach to avoid consuming indentation.
+                self.de.skip_to_next_line()?;
                 self.de.skip_block_gaps()?;
 
                 if self.de.is_eof()? {
@@ -1283,17 +1324,17 @@ impl<'de, R: Read<'de>> de::SeqAccess<'de> for SeqAccess<'_, R> {
                 if spaces != indent {
                     return Ok(None);
                 }
-                if !self.de.eat_spaces(indent)? {
+                // Check for `- ` at position indent BEFORE consuming spaces
+                if self.de.peek_at(indent)? != Some(b'-')
+                    || self.de.peek_at(indent + 1)? != Some(b' ')
+                {
+                    // Not a sequence entry — don't consume the indent
                     return Ok(None);
                 }
-                // Check for `- `
-                if self.de.peek()? != Some('-') || self.de.peek_nth(1)? != Some(' ') {
-                    // Not a sequence entry — rewind indent
-                    self.de.set_offset(self.de.offset() - indent);
-                    return Ok(None);
+                // Now consume indent + `- `
+                for _ in 0..indent + 2 {
+                    self.de.advance()?;
                 }
-                self.de.advance()?; // eat '-'
-                self.de.advance()?; // eat ' '
                 seed.deserialize(&mut *self.de).map(Some)
             }
         }
@@ -1312,15 +1353,11 @@ struct MapAccess<'a, R> {
     style: MapStyle,
     first: bool,
     seen_keys: HashSet<String>,
-    /// Pre-scanned first key from `deserialize_any`, avoiding a rewind.
     prescanned_first_key: Option<PrescannedKey>,
 }
 
-/// A key already scanned by `deserialize_any` before deciding this is a mapping.
 struct PrescannedKey {
-    /// The decoded key string (after unquoting/unescaping).
     value: String,
-    /// The raw source text of the key (for duplicate/validation checks).
     raw: String,
 }
 
@@ -1350,11 +1387,8 @@ impl<'a, R> MapAccess<'a, R> {
     }
 }
 
-impl<'de, R: Read<'de>> MapAccess<'_, R> {
-    /// Validate that an unquoted mapping key does not resolve to null or float.
-    /// Per spec: "A mapping key MUST NOT resolve to null or float."
+impl<R: Read> MapAccess<'_, R> {
     fn validate_key(&self, key_text: &str) -> Result<()> {
-        // Quoted keys (starting with `"`) are always allowed
         if key_text.starts_with('"') {
             return Ok(());
         }
@@ -1373,7 +1407,7 @@ impl<'de, R: Read<'de>> MapAccess<'_, R> {
     }
 }
 
-impl<'de, R: Read<'de>> de::MapAccess<'de> for MapAccess<'_, R> {
+impl<'de, R: Read> de::MapAccess<'de> for MapAccess<'_, R> {
     type Error = Error;
 
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>
@@ -1384,30 +1418,30 @@ impl<'de, R: Read<'de>> de::MapAccess<'de> for MapAccess<'_, R> {
             MapStyle::Flow => {
                 self.de.ctx = Context::Flow;
                 self.de.skip_whitespace_and_comments()?;
-                if self.de.peek()? == Some('}') {
+                if self.de.peek()? == Some(b'}') {
                     return Ok(None);
                 }
                 if !self.first {
-                    if !self.de.eat(',')? {
+                    if !self.de.eat(b',')? {
                         return Err(self.de.error("expected `,` or `}`"));
                     }
                     self.de.skip_whitespace_and_comments()?;
-                    if self.de.peek()? == Some('}') {
-                        return Ok(None); // trailing comma
+                    if self.de.peek()? == Some(b'}') {
+                        return Ok(None);
                     }
                 }
                 self.first = false;
                 self.de.reading_key = true;
-                let key_start = self.de.offset();
+                self.de.start_recording();
                 let key = seed.deserialize(&mut *self.de)?;
-                let key_text = self.de.read.input()[key_start..self.de.offset()].to_string();
+                let key_text = self.de.stop_recording();
                 self.de.reading_key = false;
                 self.validate_key(&key_text)?;
                 if !self.seen_keys.insert(key_text.clone()) {
                     return Err(self.de.error(&format!("duplicate key `{key_text}`")));
                 }
                 self.de.skip_whitespace_and_comments()?;
-                if !self.de.eat(':')? {
+                if !self.de.eat(b':')? {
                     return Err(self.de.error("expected `:` after mapping key"));
                 }
                 self.de.skip_whitespace_and_comments()?;
@@ -1417,38 +1451,18 @@ impl<'de, R: Read<'de>> de::MapAccess<'de> for MapAccess<'_, R> {
                 let indent = *indent;
                 if self.first {
                     self.first = false;
-                    // If deserialize_any already scanned the first key, use it.
                     if let Some(key) = self.prescanned_first_key.take() {
                         self.validate_key(&key.raw)?;
                         if !self.seen_keys.insert(key.raw) {
                             return Err(self.de.error("duplicate key"));
                         }
-                        let val = seed.deserialize(
-                            de::value::StringDeserializer::<Error>::new(key.value),
-                        )?;
+                        let val = seed
+                            .deserialize(de::value::StringDeserializer::<Error>::new(key.value))?;
                         return Ok(Some(val));
                     }
-                    // Indent already consumed by deserialize_map/struct
                 } else {
-                    // Between entries: finish current line, move to next.
-                    // A nested block value may have already consumed the
-                    // newline, leaving us at the start of a new line.
-                    //
-                    // Note: we do NOT clear pending_top_comment here.
-                    // A comment captured by skip_block_gaps may belong to
-                    // a parent collection's next entry if this map is ending.
-                    let saved = self.de.offset();
-                    if !self.de.is_break_or_eof()? {
-                        self.de.skip_inline_whitespace()?;
-                        if self.de.peek()? == Some('#') {
-                            self.de.rest_of_line()?;
-                        }
-                    }
-                    if !self.de.is_eof()? && !self.de.eat_break()? {
-                        // No break found — newline was already consumed
-                        // by a nested value. Restore position.
-                        self.de.set_offset(saved);
-                    }
+                    // Between entries
+                    self.de.skip_to_next_line()?;
                     self.de.skip_block_gaps()?;
 
                     if self.de.is_eof()? {
@@ -1459,30 +1473,29 @@ impl<'de, R: Read<'de>> de::MapAccess<'de> for MapAccess<'_, R> {
                     if spaces != indent {
                         return Ok(None);
                     }
+                    // Check for sequence indicator BEFORE consuming indent
+                    if self.de.peek_at(indent)? == Some(b'-')
+                        && self.de.peek_at(indent + 1)? == Some(b' ')
+                    {
+                        // Not a mapping entry — it's a sequence entry at this indent
+                        return Ok(None);
+                    }
                     self.de.eat_spaces(indent)?;
                 }
 
-                // Check for sequence indicator (not a mapping entry)
-                if self.de.peek()? == Some('-') && self.de.peek_nth(1)? == Some(' ') {
-                    // Rewind indent
-                    self.de.set_offset(self.de.offset() - indent);
-                    return Ok(None);
-                }
-
                 self.de.reading_key = true;
-                let key_start = self.de.offset();
+                self.de.start_recording();
                 let key = seed.deserialize(&mut *self.de)?;
-                let key_text = self.de.read.input()[key_start..self.de.offset()].to_string();
+                let key_text = self.de.stop_recording();
                 self.de.reading_key = false;
                 self.validate_key(&key_text)?;
                 if !self.seen_keys.insert(key_text.clone()) {
                     return Err(self.de.error(&format!("duplicate key `{key_text}`")));
                 }
                 self.de.skip_inline_whitespace()?;
-                if !self.de.eat(':')? {
+                if !self.de.eat(b':')? {
                     return Err(self.de.error("expected `:` after mapping key"));
                 }
-                // Skip inline whitespace after colon (value follows)
                 self.de.skip_inline_whitespace()?;
                 Ok(Some(key))
             }
@@ -1493,8 +1506,6 @@ impl<'de, R: Read<'de>> de::MapAccess<'de> for MapAccess<'_, R> {
     where
         V: de::DeserializeSeed<'de>,
     {
-        // For flow mappings, ctx is already set to Flow by next_key_seed.
-        // It will be restored to prev_ctx when next_key_seed detects `}`.
         seed.deserialize(&mut *self.de)
     }
 }
@@ -1512,11 +1523,10 @@ struct CommentedAccess<'a, R> {
     de: &'a mut Deserializer<R>,
     top_comment: Option<String>,
     state: CommentedState,
-    /// Offset before value deserialization; used to detect line crossings.
-    value_start: usize,
+    value_start_line: usize,
 }
 
-impl<'de, R: Read<'de>> de::MapAccess<'de> for CommentedAccess<'_, R> {
+impl<'de, R: Read> de::MapAccess<'de> for CommentedAccess<'_, R> {
     type Error = Error;
 
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>
@@ -1546,17 +1556,12 @@ impl<'de, R: Read<'de>> de::MapAccess<'de> for CommentedAccess<'_, R> {
             }
             CommentedState::Value => {
                 self.state = CommentedState::InlineComment;
-                self.value_start = self.de.offset();
+                self.value_start_line = self.de.line;
                 seed.deserialize(&mut *self.de)
             }
             CommentedState::InlineComment => {
                 self.state = CommentedState::Done;
-                // Only capture an inline comment if the value didn't cross
-                // a line boundary. Block collections consume newlines, leaving
-                // the cursor at the next line's indentation — calling
-                // capture_inline_comment would eat those indent spaces.
-                let crossed_line =
-                    self.de.read.input()[self.value_start..self.de.offset()].contains('\n');
+                let crossed_line = self.de.line != self.value_start_line;
                 let comment = if crossed_line {
                     None
                 } else {
@@ -1599,9 +1604,7 @@ impl<'de> de::Deserializer<'de> for OptionStringDeserializer {
 // ── EnumAccess / VariantAccess ────────────────────────────────────
 
 enum EnumStyle {
-    /// Unit variant: just a bare/quoted string (e.g. `Red`).
     Unit,
-    /// Mapping variant: key: value (block) or inside `{ }` (flow).
     Mapping,
 }
 
@@ -1611,7 +1614,7 @@ struct EnumAccess<'a, R> {
     prescanned_variant: Option<String>,
 }
 
-impl<'a, 'de, R: Read<'de>> de::EnumAccess<'de> for EnumAccess<'a, R> {
+impl<'a, 'de, R: Read> de::EnumAccess<'de> for EnumAccess<'a, R> {
     type Error = Error;
     type Variant = VariantAccess<'a, R>;
 
@@ -1630,13 +1633,11 @@ impl<'a, 'de, R: Read<'de>> de::EnumAccess<'de> for EnumAccess<'a, R> {
             }
             EnumStyle::Mapping => {
                 let variant = if let Some(text) = self.prescanned_variant {
-                    // Variant was already scanned and `:` consumed by deserialize_enum
                     seed.deserialize(de::value::StringDeserializer::<Error>::new(text))?
                 } else {
-                    // Flow context: read the variant name (key), then consume `:`
                     let variant = seed.deserialize(&mut *self.de)?;
                     self.de.skip_inline_whitespace()?;
-                    if !self.de.eat(':')? {
+                    if !self.de.eat(b':')? {
                         return Err(self.de.error("expected `:` after enum variant name"));
                     }
                     self.de.skip_inline_whitespace()?;
@@ -1652,7 +1653,7 @@ struct VariantAccess<'a, R> {
     de: &'a mut Deserializer<R>,
 }
 
-impl<'de, R: Read<'de>> de::VariantAccess<'de> for VariantAccess<'_, R> {
+impl<'de, R: Read> de::VariantAccess<'de> for VariantAccess<'_, R> {
     type Error = Error;
 
     fn unit_variant(self) -> Result<()> {
@@ -1682,14 +1683,7 @@ impl<'de, R: Read<'de>> de::VariantAccess<'de> for VariantAccess<'_, R> {
 }
 
 // ── Scalar parsing helpers ───────────────────────────────────────
-//
-// These duplicate logic from ayml-core's grammar.rs. They operate on
-// already-scanned bare text and are the building blocks the deserializer
-// uses when serde requests a specific type.
 
-/// Decode a single escape sequence from a char iterator (positioned after the `\`).
-/// Used by triple-quoted string processing where we iterate over collected lines
-/// rather than the streaming deserializer.
 fn decode_escape_char(
     chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
 ) -> std::result::Result<char, String> {
@@ -1731,19 +1725,37 @@ fn decode_hex_escape(
     char::from_u32(value).ok_or_else(|| format!("invalid unicode code point U+{value:04X}"))
 }
 
-fn is_indicator(ch: char) -> bool {
+fn is_ascii_whitespace(b: u8) -> bool {
+    matches!(b, b' ' | b'\t' | b'\n' | b'\r')
+}
+
+fn is_indicator_byte(b: u8) -> bool {
     matches!(
-        ch,
-        '-' | ':' | ',' | '[' | ']' | '{' | '}' | '#' | '"' | '\\'
+        b,
+        b'-' | b':' | b',' | b'[' | b']' | b'{' | b'}' | b'#' | b'"' | b'\\'
     )
 }
 
-fn is_plain_first(ch: char) -> bool {
-    if is_indicator(ch) {
-        ch == '-' || ch == ':'
-    } else {
-        !ch.is_ascii_whitespace() && is_printable(ch)
+/// Check if a byte can start a plain (bare) scalar.
+fn is_plain_first_byte(b: u8) -> bool {
+    if b >= 0x80 {
+        // Start of multi-byte UTF-8 — allowed as plain first
+        return true;
     }
+    if is_indicator_byte(b) {
+        b == b'-' || b == b':'
+    } else {
+        !is_ascii_whitespace(b) && is_printable_byte_start(b)
+    }
+}
+
+/// Check if byte is a valid start for printable content.
+fn is_printable_byte_start(b: u8) -> bool {
+    if b >= 0x80 {
+        return true; // Multi-byte UTF-8, validated later
+    }
+    // Printable ASCII (tab is allowed in inline whitespace context)
+    b == 0x09 || (0x20..=0x7E).contains(&b)
 }
 
 fn is_printable(ch: char) -> bool {
@@ -1759,8 +1771,6 @@ fn is_printable(ch: char) -> bool {
     )
 }
 
-/// Try to parse as an AYML integer. Returns `Ok(Some(i64))` on success,
-/// `Ok(None)` if not an integer, or `Err(())` on overflow.
 fn try_parse_int(s: &str) -> std::result::Result<Option<i64>, ()> {
     let (unsigned, negative) = match s.strip_prefix('-') {
         Some(rest) => (rest, true),
@@ -1803,7 +1813,6 @@ fn try_parse_int(s: &str) -> std::result::Result<Option<i64>, ()> {
     i64::try_from(signed).map(Some).map_err(|_| ())
 }
 
-/// Parse an unsigned integer (for u64 values that exceed i64 range).
 fn parse_unsigned(s: &str) -> Option<u64> {
     let s = s.strip_prefix('+').unwrap_or(s);
 
@@ -1818,7 +1827,6 @@ fn parse_unsigned(s: &str) -> Option<u64> {
     }
 }
 
-/// Try to parse as an AYML float.
 fn try_parse_float(s: &str) -> Option<f64> {
     match s {
         "inf" | "+inf" => return Some(f64::INFINITY),
@@ -1882,36 +1890,6 @@ fn valid_exponent(exp: &str) -> bool {
         .or_else(|| exp.strip_prefix('-'))
         .unwrap_or(exp);
     !exp.is_empty() && exp.chars().all(|c| c.is_ascii_digit())
-}
-
-/// Compute the column indent of `offset` within `source` (number of bytes
-/// since the last newline or start of input).
-fn indent_at(source: &str, offset: usize) -> usize {
-    let bytes = source.as_bytes();
-    for i in (0..offset).rev() {
-        if bytes[i] == b'\n' || bytes[i] == b'\r' {
-            return offset - i - 1;
-        }
-    }
-    offset
-}
-
-fn line_col(source: &str, offset: usize) -> (usize, usize) {
-    let offset = offset.min(source.len());
-    let mut line = 1;
-    let mut col = 1;
-    for (i, ch) in source.char_indices() {
-        if i >= offset {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            col = 1;
-        } else {
-            col += 1;
-        }
-    }
-    (line, col)
 }
 
 #[cfg(test)]
@@ -2012,7 +1990,6 @@ mod tests {
 
     #[test]
     fn test_any_resolution() {
-        // Verify deserialize_any resolves types correctly
         #[derive(serde::Deserialize, Debug, PartialEq)]
         #[serde(untagged)]
         enum AnyScalar {
@@ -2426,7 +2403,6 @@ mod tests {
 
     #[test]
     fn test_depth_limit_flow_map() {
-        // {a: {a: {a: ... }}}
         let input = "{a: ".repeat(MAX_DEPTH + 1) + &"}".repeat(MAX_DEPTH + 1);
         let err = from_str::<crate::Value>(&input).unwrap_err();
         assert!(
@@ -2437,7 +2413,6 @@ mod tests {
 
     #[test]
     fn test_depth_within_limit() {
-        // 3 levels of nesting should be fine
         let val: crate::Value = from_str("[[1, 2], [3, 4]]").unwrap();
         assert!(matches!(val, crate::Value::Seq(_)));
     }

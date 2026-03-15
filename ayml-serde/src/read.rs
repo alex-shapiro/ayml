@@ -1,164 +1,136 @@
+use std::collections::VecDeque;
+use std::io::BufRead;
+
 use crate::error::{Error, Result};
 
-/// Trait abstracting over input sources for the deserializer.
-///
-/// Provides lazy access to a `&str` buffer and a byte offset cursor.
-/// For [`StrRead`], all data is available immediately. For [`IoRead`],
-/// data is read from the underlying reader on demand.
-pub(crate) trait Read<'de> {
-    /// Ensure at least `pos` bytes of input are available.
-    /// Returns `Ok(true)` if `pos` bytes are available, `Ok(false)` if
-    /// EOF was reached first.
-    fn fill_to(&mut self, pos: usize) -> Result<bool>;
+/// Byte-level peekable reader trait for the deserializer.
+pub(crate) trait Read {
+    /// Peek at the next byte without consuming it.
+    fn peek(&mut self) -> Result<Option<u8>>;
 
-    /// The full available input text (up to what has been filled so far).
-    fn input(&self) -> &str;
+    /// Peek at the byte `n` positions ahead (0 = same as `peek()`).
+    fn peek_at(&mut self, n: usize) -> Result<Option<u8>>;
 
-    /// Current byte offset into the input.
-    fn offset(&self) -> usize;
+    /// Consume and return the next byte.
+    fn next(&mut self) -> Result<Option<u8>>;
 
-    /// Set the byte offset (for save/restore backtracking within already-available data).
-    fn set_offset(&mut self, offset: usize);
+    /// Current byte offset from the start of input.
+    fn byte_offset(&self) -> usize;
 }
 
-// ── StrRead ──────────────────────────────────────────────────────
+// ── SliceRead ──────────────────────────────────────────────────
 
-/// Read implementation over a borrowed `&str`.
-/// All data is available immediately; [`fill_to`](Read::fill_to) is a no-op.
-pub(crate) struct StrRead<'a> {
-    input: &'a str,
-    offset: usize,
+/// Read implementation over a borrowed `&[u8]` slice.
+pub(crate) struct SliceRead<'a> {
+    slice: &'a [u8],
+    index: usize,
 }
 
-impl<'a> StrRead<'a> {
-    pub fn new(input: &'a str) -> Self {
-        Self { input, offset: 0 }
+impl<'a> SliceRead<'a> {
+    pub fn new(slice: &'a [u8]) -> Self {
+        Self { slice, index: 0 }
     }
 }
 
-impl<'a> Read<'a> for StrRead<'a> {
+impl Read for SliceRead<'_> {
     #[inline]
-    fn fill_to(&mut self, _pos: usize) -> Result<bool> {
-        Ok(true)
+    fn peek(&mut self) -> Result<Option<u8>> {
+        Ok(self.slice.get(self.index).copied())
     }
 
     #[inline]
-    fn input(&self) -> &str {
-        self.input
+    fn peek_at(&mut self, n: usize) -> Result<Option<u8>> {
+        Ok(self.slice.get(self.index + n).copied())
     }
 
     #[inline]
-    fn offset(&self) -> usize {
-        self.offset
+    fn next(&mut self) -> Result<Option<u8>> {
+        match self.slice.get(self.index) {
+            Some(&b) => {
+                self.index += 1;
+                Ok(Some(b))
+            }
+            None => Ok(None),
+        }
     }
 
     #[inline]
-    fn set_offset(&mut self, offset: usize) {
-        self.offset = offset;
+    fn byte_offset(&self) -> usize {
+        self.index
     }
 }
 
-// ── IoRead ───────────────────────────────────────────────────────
+// ── IoRead ─────────────────────────────────────────────────────
 
-/// Read implementation over an `io::Read`, buffering lazily.
-///
-/// Data is read from the underlying reader in chunks as the deserializer
-/// advances. The internal buffer grows monotonically and is never compacted
-/// during deserialization, so backtracking within already-read data is safe.
+/// Read implementation over an `io::Read`, using a small lookahead buffer.
 pub(crate) struct IoRead<R> {
-    reader: R,
-    buf: String,
+    reader: std::io::BufReader<R>,
+    /// Lookahead buffer for `peek_at` support.
+    buf: VecDeque<u8>,
+    /// Total bytes consumed (returned via next/discard) so far.
     offset: usize,
     done: bool,
-    /// Leftover bytes from incomplete UTF-8 sequence at chunk boundary.
-    pending: Vec<u8>,
-    /// Maximum buffer size. Prevents OOM from unbounded input.
-    max_buf: usize,
 }
-
-/// Default maximum buffer size for `IoRead` (256 MiB).
-pub(crate) const DEFAULT_MAX_IO_BUF: usize = 256 * 1024 * 1024;
 
 impl<R: std::io::Read> IoRead<R> {
     pub fn new(reader: R) -> Self {
-        Self::with_max_buf(reader, DEFAULT_MAX_IO_BUF)
-    }
-
-    pub fn with_max_buf(reader: R, max_buf: usize) -> Self {
         Self {
-            reader,
-            buf: String::new(),
+            reader: std::io::BufReader::new(reader),
+            buf: VecDeque::new(),
             offset: 0,
             done: false,
-            pending: Vec::new(),
-            max_buf,
         }
+    }
+
+    /// Ensure `buf` has at least `n` bytes (if available from the reader).
+    fn fill_buf_to(&mut self, n: usize) -> Result<()> {
+        while self.buf.len() < n && !self.done {
+            let available = self.reader.fill_buf().map_err(Error::from)?;
+            if available.is_empty() {
+                self.done = true;
+                break;
+            }
+            let len = available.len();
+            self.buf.extend(available.iter());
+            self.reader.consume(len);
+        }
+        Ok(())
     }
 }
 
-impl<R: std::io::Read> Read<'_> for IoRead<R> {
-    fn fill_to(&mut self, pos: usize) -> Result<bool> {
-        if self.buf.len() > self.max_buf || pos > self.max_buf {
-            return Err(Error::Message(format!(
-                "input exceeds maximum size ({} bytes)", self.max_buf
-            )));
+impl<R: std::io::Read> Read for IoRead<R> {
+    #[inline]
+    fn peek(&mut self) -> Result<Option<u8>> {
+        if self.buf.is_empty() {
+            self.fill_buf_to(1)?;
         }
-        while self.buf.len() < pos && !self.done {
-            let mut tmp = [0u8; 4096];
-            let n = self.reader.read(&mut tmp).map_err(Error::from)?;
-            if n == 0 {
-                self.done = true;
-                if !self.pending.is_empty() {
-                    return Err(Error::Message(
-                        "invalid UTF-8: incomplete sequence at end of input".into(),
-                    ));
-                }
-                break;
-            }
-
-            // Combine any pending bytes from a previous incomplete UTF-8 sequence
-            // with the new chunk.
-            let mut to_decode = std::mem::take(&mut self.pending);
-            to_decode.extend_from_slice(&tmp[..n]);
-
-            match std::str::from_utf8(&to_decode) {
-                Ok(s) => {
-                    self.buf.push_str(s);
-                }
-                Err(e) => {
-                    let valid_up_to = e.valid_up_to();
-                    // Safety: from_utf8 guarantees bytes[..valid_up_to] is valid UTF-8.
-                    self.buf.push_str(unsafe {
-                        std::str::from_utf8_unchecked(&to_decode[..valid_up_to])
-                    });
-
-                    if e.error_len().is_some() {
-                        // Genuinely invalid byte (not just an incomplete sequence).
-                        return Err(Error::Message(format!(
-                            "invalid UTF-8 at byte {}",
-                            self.buf.len()
-                        )));
-                    }
-                    // Incomplete sequence at end of chunk — save for next read.
-                    self.pending = to_decode[valid_up_to..].to_vec();
-                }
-            }
-        }
-        Ok(self.buf.len() >= pos)
+        Ok(self.buf.front().copied())
     }
 
     #[inline]
-    fn input(&self) -> &str {
-        &self.buf
+    fn peek_at(&mut self, n: usize) -> Result<Option<u8>> {
+        if self.buf.len() <= n {
+            self.fill_buf_to(n + 1)?;
+        }
+        Ok(self.buf.get(n).copied())
     }
 
     #[inline]
-    fn offset(&self) -> usize {
+    fn next(&mut self) -> Result<Option<u8>> {
+        if self.buf.is_empty() {
+            self.fill_buf_to(1)?;
+        }
+        match self.buf.pop_front() {
+            Some(b) => {
+                self.offset += 1;
+                Ok(Some(b))
+            }
+            None => Ok(None),
+        }
+    }
+
+    #[inline]
+    fn byte_offset(&self) -> usize {
         self.offset
-    }
-
-    #[inline]
-    fn set_offset(&mut self, offset: usize) {
-        self.offset = offset;
     }
 }

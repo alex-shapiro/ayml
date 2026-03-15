@@ -910,12 +910,10 @@ fn needs_quoting(s: &str) -> bool {
             0x00..=0x08 | 0x0B | 0x0C | 0x0E..=0x1F | 0x7F | b'\n' | b'\r' | b'"' | b'\\' => {
                 return true;
             }
-            // Flow indicators mid-string would break in flow context
-            b',' | b'[' | b']' | b'{' | b'}' => return true,
+            // Flow indicators and '#' mid-string would break parsing
+            b',' | b'[' | b']' | b'{' | b'}' | b'#' => return true,
             // `: ` mid-string would be parsed as mapping indicator
             b':' if i + 1 < bytes.len() && bytes[i + 1] == b' ' => return true,
-            // '#' is not allowed in bare strings
-            b'#' => return true,
             _ => {}
         }
     }
