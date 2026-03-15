@@ -1,3 +1,4 @@
+mod commented_value;
 mod commentable;
 pub mod de;
 mod error;
@@ -5,6 +6,7 @@ mod read;
 pub mod ser;
 mod value;
 
+pub use commented_value::{CommentedValue, CommentedValueKind};
 pub use commentable::Commentable;
 pub use error::{Error, Result};
 pub use value::Value;
