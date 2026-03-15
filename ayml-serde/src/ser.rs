@@ -914,8 +914,8 @@ fn needs_quoting(s: &str) -> bool {
             b',' | b'[' | b']' | b'{' | b'}' => return true,
             // `: ` mid-string would be parsed as mapping indicator
             b':' if i + 1 < bytes.len() && bytes[i + 1] == b' ' => return true,
-            // `<whitespace>#` would start a comment (space or tab)
-            b'#' if i > 0 && (bytes[i - 1] == b' ' || bytes[i - 1] == b'\t') => return true,
+            // '#' is not allowed in bare strings
+            b'#' => return true,
             _ => {}
         }
     }

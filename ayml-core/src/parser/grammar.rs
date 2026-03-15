@@ -470,9 +470,14 @@ impl<'a> Parser<'a> {
         source: &str,
     ) -> Result<String, Error> {
         let mut result = String::new();
+        let mut continuation = false;
         for (i, line) in raw_lines.iter().enumerate() {
             if i > 0 {
-                result.push('\n');
+                if continuation {
+                    continuation = false;
+                } else {
+                    result.push('\n');
+                }
             }
 
             let stripped = if line.len() >= closing_indent
@@ -489,7 +494,7 @@ impl<'a> Parser<'a> {
             while let Some(ch) = chars.next() {
                 if ch == '\\' {
                     if chars.peek().is_none() {
-                        result.push('\x00'); // sentinel for line continuation
+                        continuation = true;
                         continue;
                     }
                     Self::process_escape_char(&mut chars, &mut result, start, source)?;
@@ -498,7 +503,7 @@ impl<'a> Parser<'a> {
                 }
             }
         }
-        Ok(result.replace("\x00\n", ""))
+        Ok(result)
     }
 
     /// Process a single escape character from an iterator (after consuming the backslash).
@@ -606,16 +611,12 @@ impl<'a> Parser<'a> {
 
             match self.scanner.peek() {
                 Some('#') => {
-                    // `#` preceded by whitespace starts a comment
+                    // '#' is not allowed in bare strings; terminate here
                     if ws_end > ws_start {
-                        // Rewind to before the whitespace so the caller
-                        // can parse the inline comment.
                         self.scanner.offset = ws_start;
-                        let text = self.scanner.input[start..ws_start].to_string();
-                        return Ok(text);
                     }
-                    // `#` preceded by non-space is part of the string
-                    self.scanner.advance();
+                    let text = self.scanner.input[start..self.scanner.offset].to_string();
+                    return Ok(text);
                 }
                 Some(':') => {
                     // `:` followed by space/break/eof ends the scalar (it's a mapping value)
@@ -1284,17 +1285,11 @@ impl<'a> Parser<'a> {
                     return Ok(text);
                 }
                 Some('#') => {
-                    // Check if preceded by whitespace
-                    if self.scanner.offset > start {
-                        let prev_byte = self.scanner.input.as_bytes()[self.scanner.offset - 1];
-                        if prev_byte == b' ' || prev_byte == b'\t' {
-                            let text = self.scanner.input[start..self.scanner.offset]
-                                .trim_end()
-                                .to_string();
-                            return Ok(text);
-                        }
-                    }
-                    self.scanner.advance();
+                    // '#' is not allowed in bare strings; terminate here
+                    let text = self.scanner.input[start..self.scanner.offset]
+                        .trim_end()
+                        .to_string();
+                    return Ok(text);
                 }
                 Some(_) => {
                     self.scanner.advance();

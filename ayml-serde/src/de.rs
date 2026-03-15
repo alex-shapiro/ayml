@@ -567,46 +567,12 @@ impl<'de, R: Read<'de>> Deserializer<R> {
             while let Some(ch) = chars.next() {
                 if ch == '\\' {
                     if chars.peek().is_none() {
-                        // `\` at end of line → line continuation
                         continuation = true;
                         continue;
                     }
-                    match chars.next() {
-                        Some('0') => result.push('\0'),
-                        Some('a') => result.push('\x07'),
-                        Some('b') => result.push('\x08'),
-                        Some('t') => result.push('\t'),
-                        Some('n') => result.push('\n'),
-                        Some('v') => result.push('\x0B'),
-                        Some('f') => result.push('\x0C'),
-                        Some('r') => result.push('\r'),
-                        Some('e') => result.push('\x1B'),
-                        Some(' ') => result.push(' '),
-                        Some('"') => result.push('"'),
-                        Some('/') => result.push('/'),
-                        Some('\\') => result.push('\\'),
-                        Some('x') => {
-                            let ch = Self::take_hex_from_chars(&mut chars, 2)
-                                .map_err(|()| self.error_at("invalid hex escape", start))?;
-                            result.push(ch);
-                        }
-                        Some('u') => {
-                            let ch = Self::take_hex_from_chars(&mut chars, 4)
-                                .map_err(|()| self.error_at("invalid unicode escape", start))?;
-                            result.push(ch);
-                        }
-                        Some('U') => {
-                            let ch = Self::take_hex_from_chars(&mut chars, 8)
-                                .map_err(|()| self.error_at("invalid unicode escape", start))?;
-                            result.push(ch);
-                        }
-                        Some(c) => {
-                            return Err(self.error_at(&format!("invalid escape: \\{c}"), start));
-                        }
-                        None => {
-                            return Err(self.error_at("unexpected end of escape", start));
-                        }
-                    }
+                    let decoded = decode_escape_char(&mut chars)
+                        .map_err(|msg| self.error_at(&msg, start))?;
+                    result.push(decoded);
                 } else {
                     result.push(ch);
                 }
@@ -614,23 +580,6 @@ impl<'de, R: Read<'de>> Deserializer<R> {
         }
 
         Ok(result)
-    }
-
-    /// Take `n` hex digits from a char iterator and decode to a char.
-    fn take_hex_from_chars(
-        chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
-        n: usize,
-    ) -> std::result::Result<char, ()> {
-        let mut value: u32 = 0;
-        for _ in 0..n {
-            match chars.next() {
-                Some(ch) if ch.is_ascii_hexdigit() => {
-                    value = value * 16 + ch.to_digit(16).unwrap();
-                }
-                _ => return Err(()),
-            }
-        }
-        char::from_u32(value).ok_or(())
     }
 
     /// Parse a double-quoted escape sequence (after consuming the `\`).
@@ -715,12 +664,12 @@ impl<'de, R: Read<'de>> Deserializer<R> {
             }
 
             match self.peek()? {
-                Some('#') if ws_end > ws_start => {
-                    self.set_offset(ws_start);
-                    return Ok(self.read.input()[start..ws_start].to_string());
-                }
                 Some('#') => {
-                    self.advance()?;
+                    // '#' is not allowed in bare strings; terminate here
+                    if ws_end > ws_start {
+                        self.set_offset(ws_start);
+                    }
+                    return Ok(self.read.input()[start..self.offset()].to_string());
                 }
                 Some(':') => {
                     let next = self.peek_nth(1)?;
@@ -1737,6 +1686,50 @@ impl<'de, R: Read<'de>> de::VariantAccess<'de> for VariantAccess<'_, R> {
 // These duplicate logic from ayml-core's grammar.rs. They operate on
 // already-scanned bare text and are the building blocks the deserializer
 // uses when serde requests a specific type.
+
+/// Decode a single escape sequence from a char iterator (positioned after the `\`).
+/// Used by triple-quoted string processing where we iterate over collected lines
+/// rather than the streaming deserializer.
+fn decode_escape_char(
+    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+) -> std::result::Result<char, String> {
+    match chars.next() {
+        Some('0') => Ok('\0'),
+        Some('a') => Ok('\x07'),
+        Some('b') => Ok('\x08'),
+        Some('t') => Ok('\t'),
+        Some('n') => Ok('\n'),
+        Some('v') => Ok('\x0B'),
+        Some('f') => Ok('\x0C'),
+        Some('r') => Ok('\r'),
+        Some('e') => Ok('\x1B'),
+        Some(' ') => Ok(' '),
+        Some('"') => Ok('"'),
+        Some('/') => Ok('/'),
+        Some('\\') => Ok('\\'),
+        Some('x') => decode_hex_escape(chars, 2),
+        Some('u') => decode_hex_escape(chars, 4),
+        Some('U') => decode_hex_escape(chars, 8),
+        Some(c) => Err(format!("invalid escape: \\{c}")),
+        None => Err("unexpected end of escape".into()),
+    }
+}
+
+fn decode_hex_escape(
+    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+    n: usize,
+) -> std::result::Result<char, String> {
+    let mut value: u32 = 0;
+    for _ in 0..n {
+        match chars.next() {
+            Some(ch) if ch.is_ascii_hexdigit() => {
+                value = value * 16 + ch.to_digit(16).unwrap();
+            }
+            _ => return Err(format!("expected {n} hex digits")),
+        }
+    }
+    char::from_u32(value).ok_or_else(|| format!("invalid unicode code point U+{value:04X}"))
+}
 
 fn is_indicator(ch: char) -> bool {
     matches!(
