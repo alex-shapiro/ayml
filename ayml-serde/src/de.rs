@@ -57,6 +57,9 @@ pub(crate) struct Deserializer<R> {
     /// (zero-copy path, to be wired up in a future pass).
     #[allow(dead_code)]
     scratch: Vec<u8>,
+    /// Set to true when we're reading a mapping key, to prevent
+    /// `deserialize_any` from re-detecting the colon as a new mapping.
+    reading_key: bool,
 }
 
 impl<'a> Deserializer<StrRead<'a>> {
@@ -65,6 +68,7 @@ impl<'a> Deserializer<StrRead<'a>> {
             read: StrRead::new(s),
             ctx: Context::Block,
             scratch: Vec::new(),
+            reading_key: false,
         }
     }
 }
@@ -75,6 +79,7 @@ impl<R: std::io::Read> Deserializer<IoRead<R>> {
             read: IoRead::new(rdr),
             ctx: Context::Block,
             scratch: Vec::new(),
+            reading_key: false,
         }
     }
 }
@@ -520,12 +525,14 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
             Some('"') => {
                 let start = self.offset();
                 let s = self.scan_double_quoted()?;
-                // Check if this is a mapping key
-                self.skip_inline_whitespace()?;
-                if self.is_mapping_value_indicator()? {
-                    self.set_offset(start);
-                    let indent = self.current_indent();
-                    return visitor.visit_map(MapAccess::new(self, MapStyle::Block(indent)));
+                // Check if this is a mapping key (but not if we're already reading a key)
+                if !self.reading_key {
+                    self.skip_inline_whitespace()?;
+                    if self.is_mapping_value_indicator()? {
+                        self.set_offset(start);
+                        let indent = self.current_indent();
+                        return visitor.visit_map(MapAccess::new(self, MapStyle::Block(indent)));
+                    }
                 }
                 visitor.visit_string(s)
             }
@@ -557,13 +564,16 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
             }
             Some(_) => {
                 // Bare scalar — but check if it's a mapping key first
+                // (skip this check if we're already reading a key)
                 let start = self.offset();
                 let text = self.scan_bare_string(self.ctx)?;
-                self.skip_inline_whitespace()?;
-                if self.is_mapping_value_indicator()? {
-                    self.set_offset(start);
-                    let indent = self.current_indent();
-                    return visitor.visit_map(MapAccess::new(self, MapStyle::Block(indent)));
+                if !self.reading_key {
+                    self.skip_inline_whitespace()?;
+                    if self.is_mapping_value_indicator()? {
+                        self.set_offset(start);
+                        let indent = self.current_indent();
+                        return visitor.visit_map(MapAccess::new(self, MapStyle::Block(indent)));
+                    }
                 }
                 // Resolve scalar type
                 match text.as_str() {
@@ -1002,7 +1012,9 @@ impl<'a, 'de, R: Read<'de>> de::MapAccess<'de> for MapAccess<'a, R> {
                     }
                 }
                 self.first = false;
+                self.de.reading_key = true;
                 let key = seed.deserialize(&mut *self.de)?;
+                self.de.reading_key = false;
                 self.de.skip_whitespace_and_comments()?;
                 if !self.de.eat(':')? {
                     return Err(self.de.error("expected `:` after mapping key"));
@@ -1046,7 +1058,9 @@ impl<'a, 'de, R: Read<'de>> de::MapAccess<'de> for MapAccess<'a, R> {
                     return Ok(None);
                 }
 
+                self.de.reading_key = true;
                 let key = seed.deserialize(&mut *self.de)?;
+                self.de.reading_key = false;
                 self.de.skip_inline_whitespace()?;
                 if !self.de.eat(':')? {
                     return Err(self.de.error("expected `:` after mapping key"));
@@ -1354,7 +1368,7 @@ mod tests {
 
     #[test]
     fn test_floats() {
-        assert_eq!(from_str::<f64>("3.14").unwrap(), 3.14);
+        assert_eq!(from_str::<f64>("3.25").unwrap(), 3.25);
         assert_eq!(from_str::<f64>("-0.5").unwrap(), -0.5);
         assert_eq!(from_str::<f64>("1e10").unwrap(), 1e10);
         assert!(from_str::<f64>("inf").unwrap().is_infinite());
@@ -1433,8 +1447,8 @@ mod tests {
         );
         assert_eq!(from_str::<AnyScalar>("42").unwrap(), AnyScalar::Int(42));
         assert_eq!(
-            from_str::<AnyScalar>("3.14").unwrap(),
-            AnyScalar::Float(3.14)
+            from_str::<AnyScalar>("3.25").unwrap(),
+            AnyScalar::Float(3.25)
         );
         assert_eq!(
             from_str::<AnyScalar>("hello").unwrap(),
@@ -1696,8 +1710,8 @@ mod tests {
             Label(String),
         }
         assert_eq!(
-            from_str::<Shape>("{Circle: 3.14}").unwrap(),
-            Shape::Circle(3.14)
+            from_str::<Shape>("{Circle: 3.25}").unwrap(),
+            Shape::Circle(3.25)
         );
         assert_eq!(
             from_str::<Shape>("{Label: hello}").unwrap(),
@@ -1712,8 +1726,8 @@ mod tests {
             Circle(f64),
         }
         assert_eq!(
-            from_str::<Shape>("Circle: 3.14").unwrap(),
-            Shape::Circle(3.14)
+            from_str::<Shape>("Circle: 3.25").unwrap(),
+            Shape::Circle(3.25)
         );
     }
 

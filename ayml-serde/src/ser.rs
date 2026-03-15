@@ -683,7 +683,7 @@ mod tests {
 
     #[test]
     fn test_floats() {
-        assert_eq!(to_string(&3.14f64).unwrap(), "3.14\n");
+        assert_eq!(to_string(&3.25f64).unwrap(), "3.25\n");
         assert_eq!(to_string(&-0.5f64).unwrap(), "-0.5\n");
         assert_eq!(to_string(&f64::INFINITY).unwrap(), "inf\n");
         assert_eq!(to_string(&f64::NEG_INFINITY).unwrap(), "-inf\n");
@@ -719,7 +719,7 @@ mod tests {
         assert_eq!(to_string(&"inf").unwrap(), "\"inf\"\n");
         assert_eq!(to_string(&"nan").unwrap(), "\"nan\"\n");
         assert_eq!(to_string(&"42").unwrap(), "\"42\"\n");
-        assert_eq!(to_string(&"3.14").unwrap(), "\"3.14\"\n");
+        assert_eq!(to_string(&"3.25").unwrap(), "\"3.25\"\n");
         assert_eq!(to_string(&"0xFF").unwrap(), "\"0xFF\"\n");
     }
 
@@ -1048,7 +1048,7 @@ ports:
             Circle(f64),
             Label(String),
         }
-        assert_eq!(to_string(&Shape::Circle(3.14)).unwrap(), "Circle: 3.14\n");
+        assert_eq!(to_string(&Shape::Circle(3.25)).unwrap(), "Circle: 3.25\n");
         assert_eq!(
             to_string(&Shape::Label("hi".into())).unwrap(),
             "Label: hi\n"
