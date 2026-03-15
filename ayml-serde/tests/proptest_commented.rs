@@ -133,17 +133,34 @@ fn arb_commented_value_inner(
 /// - Strip all inline comments: inline comments on collection nodes don't
 ///   roundtrip (they get misattributed to the last child element), so we
 ///   strip them everywhere for a clean comparison.
+/// - Strip top comments from seq elements: when the seq itself is wrapped
+///   in `Commented`, element top comments (emitted before `- `) get
+///   attributed to the parent `Commented` wrapper on deserialization.
 /// - Treat `Some("")` as `None` for top comments.
-/// - Values and top comments are the primary roundtrip targets.
+/// - Values and top comments on map values are the primary roundtrip targets.
 fn normalize(cv: &CommentedValue) -> CommentedValue {
-    let top = cv.top_comment.as_ref().filter(|c| !c.is_empty()).cloned();
+    normalize_inner(cv, false)
+}
+
+fn normalize_inner(cv: &CommentedValue, in_seq: bool) -> CommentedValue {
+    // Strip top comments from:
+    // - seq elements (they leak up to the parent Commented<Seq> wrapper)
+    // - nodes whose value is a Seq (they may have absorbed a leaked comment)
+    let is_seq_value = matches!(cv.value, CommentedValueKind::Seq(_));
+    let top = if in_seq || is_seq_value {
+        None
+    } else {
+        cv.top_comment.as_ref().filter(|c| !c.is_empty()).cloned()
+    };
     let kind = match &cv.value {
         CommentedValueKind::Seq(items) => {
-            CommentedValueKind::Seq(items.iter().map(normalize).collect())
+            CommentedValueKind::Seq(items.iter().map(|v| normalize_inner(v, true)).collect())
         }
-        CommentedValueKind::Map(map) => {
-            CommentedValueKind::Map(map.iter().map(|(k, v)| (k.clone(), normalize(v))).collect())
-        }
+        CommentedValueKind::Map(map) => CommentedValueKind::Map(
+            map.iter()
+                .map(|(k, v)| (k.clone(), normalize_inner(v, false)))
+                .collect(),
+        ),
         other => other.clone(),
     };
     CommentedValue {

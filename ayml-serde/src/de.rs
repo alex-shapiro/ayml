@@ -1003,7 +1003,12 @@ impl<'a, 'de, R: Read<'de>> de::SeqAccess<'de> for SeqAccess<'a, R> {
                 // leaving us at the start of a new line. Save position so we
                 // can restore if we mistakenly consume indentation as inline
                 // whitespace.
-                self.de.pending_top_comment = None;
+                //
+                // Note: we do NOT clear pending_top_comment here. A comment
+                // between entries in a nested block value (e.g. a struct
+                // inside this seq) may have already been captured by
+                // skip_block_gaps during the nested value's between-entries
+                // processing. That comment belongs to the next seq element.
                 let saved = self.de.offset();
                 if !self.de.is_break_or_eof()? {
                     self.de.skip_inline_whitespace()?;
@@ -1110,7 +1115,10 @@ impl<'a, 'de, R: Read<'de>> de::MapAccess<'de> for MapAccess<'a, R> {
                     // Between entries: finish current line, move to next.
                     // A nested block value may have already consumed the
                     // newline, leaving us at the start of a new line.
-                    self.de.pending_top_comment = None;
+                    //
+                    // Note: we do NOT clear pending_top_comment here.
+                    // A comment captured by skip_block_gaps may belong to
+                    // a parent collection's next entry if this map is ending.
                     let saved = self.de.offset();
                     if !self.de.is_break_or_eof()? {
                         self.de.skip_inline_whitespace()?;

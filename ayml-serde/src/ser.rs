@@ -34,9 +34,13 @@ struct Serializer<W> {
     /// After writing "key:", the next scalar gets " " prefix;
     /// the next collection gets "\n" and appropriate indent bump.
     after_key: bool,
-    /// After writing "- ", the next struct/map first entry goes inline
+    /// After "- " is pending, the next struct/map first entry goes inline
     /// (compact notation) — suppress indent for the first entry only.
     compact: bool,
+    /// When true, "- " has not yet been written for the current sequence
+    /// element. This allows `Commented<T>` to emit a top comment before
+    /// the dash indicator.
+    pending_seq_dash: bool,
 }
 
 impl<W: std::io::Write> Serializer<W> {
@@ -46,6 +50,7 @@ impl<W: std::io::Write> Serializer<W> {
             indent: 0,
             after_key: false,
             compact: false,
+            pending_seq_dash: false,
         }
     }
 
@@ -69,8 +74,19 @@ impl<W: std::io::Write> Serializer<W> {
         Ok(())
     }
 
+    /// If a sequence dash is pending, write "- " now. The caller is
+    /// responsible for any preceding indentation.
+    fn flush_pending_dash(&mut self) -> Result<()> {
+        if self.pending_seq_dash {
+            self.pending_seq_dash = false;
+            self.write_str("- ")?;
+        }
+        Ok(())
+    }
+
     /// Write the inline prefix for a scalar value that follows "key:".
     fn scalar_prefix(&mut self) -> Result<()> {
+        self.flush_pending_dash()?;
         if self.after_key {
             self.write_str(" ")?;
             self.after_key = false;
@@ -82,6 +98,7 @@ impl<W: std::io::Write> Serializer<W> {
     /// Handles after_key/compact like Compound::write_key_prefix.
     /// Returns true if indent was bumped by 2.
     fn variant_key_prefix(&mut self, variant: &str) -> Result<bool> {
+        self.flush_pending_dash()?;
         let bumped = if self.after_key {
             self.write_str("\n")?;
             self.after_key = false;
@@ -360,10 +377,12 @@ impl<W: std::io::Write> ser::SerializeSeq for SeqState<'_, W> {
             self.ser.write_str("\n")?;
             self.ser.write_indent()?;
         }
-        self.ser.write_str("- ")?;
+        self.ser.flush_pending_dash()?;
         self.ser.indent += 2;
+        self.ser.pending_seq_dash = true;
         self.ser.compact = true;
         value.serialize(&mut *self.ser)?;
+        self.ser.pending_seq_dash = false;
         self.ser.compact = false;
         self.ser.indent -= 2;
         Ok(())
@@ -372,6 +391,7 @@ impl<W: std::io::Write> ser::SerializeSeq for SeqState<'_, W> {
     fn end(self) -> Result<()> {
         if self.first {
             // Empty sequence — use flow style
+            self.ser.flush_pending_dash()?;
             if self.ser.after_key {
                 self.ser.write_str(" ")?;
                 self.ser.after_key = false;
@@ -443,6 +463,7 @@ struct Compound<'a, W> {
 
 impl<W: std::io::Write> Compound<'_, W> {
     fn write_key_prefix(&mut self) -> Result<()> {
+        self.ser.flush_pending_dash()?;
         if self.first {
             if self.ser.after_key {
                 self.ser.write_str("\n")?;
@@ -488,15 +509,38 @@ impl<W: std::io::Write> Compound<'_, W> {
                         self.ser.indent += 2;
                         self.bumped = true;
                     }
+                    // Write comment lines before the pending "- " (if any),
+                    // at the current indent minus the dash offset.
+                    let in_seq = self.ser.pending_seq_dash;
+                    let comment_indent = if in_seq {
+                        self.ser.indent.saturating_sub(2)
+                    } else {
+                        self.ser.indent
+                    };
+                    // The comment goes on its own line(s), so compact
+                    // (which means "indent already written for this line")
+                    // no longer applies.
+                    self.ser.compact = false;
                     for line in comment.lines() {
-                        self.ser.write_indent()?;
+                        for _ in 0..comment_indent {
+                            self.ser.write_str(" ")?;
+                        }
                         self.ser.write_str("# ")?;
                         self.ser.write_str(line)?;
                         self.ser.write_str("\n")?;
                     }
-                    // Write indent for the value and set compact so
-                    // collections don't double-indent.
-                    self.ser.write_indent()?;
+                    // Now position for the value to start inline.
+                    // Write indent at the appropriate level, then flush
+                    // the pending "- " if we're in a sequence.
+                    let value_indent = if self.ser.pending_seq_dash {
+                        self.ser.indent.saturating_sub(2)
+                    } else {
+                        self.ser.indent
+                    };
+                    for _ in 0..value_indent {
+                        self.ser.write_str(" ")?;
+                    }
+                    self.ser.flush_pending_dash()?;
                     self.ser.compact = true;
                 }
                 // Serialize the actual value
@@ -530,6 +574,7 @@ impl<W: std::io::Write> Compound<'_, W> {
         }
         if self.first {
             // Empty map — use flow style
+            self.ser.flush_pending_dash()?;
             if self.ser.after_key {
                 self.ser.write_str(" ")?;
                 self.ser.after_key = false;

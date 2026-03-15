@@ -58,6 +58,12 @@ impl<T> Commented<T> {
     }
 }
 
+impl<T: Default> Default for Commented<T> {
+    fn default() -> Self {
+        Self::new(T::default())
+    }
+}
+
 impl<T: Serialize> Serialize for Commented<T> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut s = serializer.serialize_struct(COMMENTED_STRUCT, 3)?;

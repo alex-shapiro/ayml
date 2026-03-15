@@ -277,3 +277,93 @@ fn roundtrip_commented_multiple_fields() {
     let c2: Config = ayml_serde::from_str(&s).unwrap();
     assert_eq!(c, c2);
 }
+
+#[test]
+fn de_commented_seq_elements() {
+    #[derive(Deserialize, Debug)]
+    struct List {
+        items: Vec<Commented<String>>,
+    }
+    let mut input = String::new();
+    input.push_str("items:\n");
+    input.push_str("# first\n");
+    input.push_str("- a\n");
+    input.push_str("# second\n");
+    input.push_str("- b\n");
+    let l: List = ayml_serde::from_str(&input).unwrap();
+    assert_eq!(l.items.len(), 2);
+    assert_eq!(l.items[0].value, "a");
+    assert_eq!(l.items[0].top_comment.as_deref(), Some("first"));
+    assert_eq!(l.items[1].value, "b");
+    assert_eq!(l.items[1].top_comment.as_deref(), Some("second"));
+}
+
+#[test]
+fn ser_commented_seq_as_map_value() {
+    #[derive(Serialize, Debug)]
+    struct Inner {
+        a: Commented<Vec<String>>,
+    }
+    #[derive(Serialize, Debug)]
+    struct Outer {
+        x: Inner,
+    }
+    let o = Outer {
+        x: Inner {
+            a: Commented {
+                top_comment: Some("comment".into()),
+                inline_comment: None,
+                value: vec!["hello".into()],
+            },
+        },
+    };
+    let s = ayml_serde::to_string(&o).unwrap();
+    // The comment and "- hello" should both be at indent 4 (under x: / a:)
+    assert!(s.contains("    # comment"), "comment at wrong indent:\n{s}");
+    assert!(s.contains("    - hello"), "dash at wrong indent:\n{s}");
+}
+
+#[test]
+fn ser_commented_seq_as_toplevel_map_value() {
+    use ayml_serde::{CommentedValue, CommentedValueKind};
+    use std::collections::HashMap;
+    let mut m = HashMap::new();
+    m.insert(
+        "A".to_string(),
+        CommentedValue {
+            top_comment: Some("a".into()),
+            inline_comment: None,
+            value: CommentedValueKind::Seq(vec![Commented::new(CommentedValueKind::Null(()))]),
+        },
+    );
+    let v = Commented::new(CommentedValueKind::Map(m));
+    let s = ayml_serde::to_string(&v).unwrap();
+    assert!(s.contains("  # a"), "comment at wrong indent:\n{s}");
+}
+
+#[test]
+fn ser_commented_value_seq_in_map() {
+    use ayml_serde::{CommentedValue, CommentedValueKind};
+    use std::collections::HashMap;
+    let mut inner = HashMap::new();
+    inner.insert(
+        "a".to_string(),
+        CommentedValue {
+            top_comment: Some("?".into()),
+            inline_comment: None,
+            value: CommentedValueKind::Seq(vec![Commented::new(CommentedValueKind::Null(()))]),
+        },
+    );
+    let mut outer = HashMap::new();
+    outer.insert(
+        "_".to_string(),
+        Commented::new(CommentedValueKind::Map(inner)),
+    );
+    let v = Commented::new(CommentedValueKind::Map(outer));
+    let s = ayml_serde::to_string(&v).unwrap();
+    assert!(s.contains("    # ?"), "comment at wrong indent:\n{s}");
+    assert!(
+        s.contains("    - null") || s.contains("  - null"),
+        "unexpected output:\n{s}"
+    );
+}
