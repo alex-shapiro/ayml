@@ -326,8 +326,8 @@ fn ser_commented_seq_as_map_value() {
 #[test]
 fn ser_commented_seq_as_toplevel_map_value() {
     use ayml_serde::{CommentedValue, CommentedValueKind};
-    use std::collections::HashMap;
-    let mut m = HashMap::new();
+    use indexmap::IndexMap;
+    let mut m = IndexMap::new();
     m.insert(
         "A".to_string(),
         CommentedValue {
@@ -344,8 +344,8 @@ fn ser_commented_seq_as_toplevel_map_value() {
 #[test]
 fn ser_commented_value_seq_in_map() {
     use ayml_serde::{CommentedValue, CommentedValueKind};
-    use std::collections::HashMap;
-    let mut inner = HashMap::new();
+    use indexmap::IndexMap;
+    let mut inner = IndexMap::new();
     inner.insert(
         "a".to_string(),
         CommentedValue {
@@ -354,7 +354,7 @@ fn ser_commented_value_seq_in_map() {
             value: CommentedValueKind::Seq(vec![Commented::new(CommentedValueKind::Null)]),
         },
     );
-    let mut outer = HashMap::new();
+    let mut outer = IndexMap::new();
     outer.insert(
         "_".to_string(),
         Commented::new(CommentedValueKind::Map(inner)),

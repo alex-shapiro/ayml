@@ -1,8 +1,8 @@
 //! Property-based tests for CommentedValue roundtrip and robustness.
 
 use ayml_serde::{CommentedValue, CommentedValueKind, from_str, to_string};
+use indexmap::IndexMap;
 use proptest::prelude::*;
-use std::collections::HashMap;
 
 // ── Generators ───────────────────────────────────────────────────
 
@@ -127,7 +127,7 @@ fn arb_commented_value_inner(
             0..4,
         )
         .prop_map(|entries| {
-            let map: HashMap<String, CommentedValue> = entries.into_iter().collect();
+            let map: IndexMap<String, CommentedValue> = entries.into_iter().collect();
             CommentedValueKind::Map(map)
         });
 

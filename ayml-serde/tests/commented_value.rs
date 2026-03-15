@@ -123,13 +123,13 @@ fn display_commented_value() {
 fn ser_nested_map_in_map() {
     // Test that a map value that is itself a Commented<Map> serializes with correct indentation
     use ayml_serde::Commented;
-    use std::collections::HashMap;
-    let mut inner_map = HashMap::new();
+    use indexmap::IndexMap;
+    let mut inner_map = IndexMap::new();
     inner_map.insert(
         "L".to_string(),
         Commented::new(CommentedValueKind::Str("42".into())),
     );
-    let mut outer_map = HashMap::new();
+    let mut outer_map = IndexMap::new();
     outer_map.insert(
         "a".to_string(),
         Commented::new(CommentedValueKind::Map(inner_map)),
@@ -145,13 +145,13 @@ fn ser_nested_map_in_map() {
 #[test]
 fn ser_multi_key_nested_map() {
     use ayml_serde::Commented;
-    use std::collections::HashMap;
-    let mut inner_map = HashMap::new();
+    use indexmap::IndexMap;
+    let mut inner_map = IndexMap::new();
     inner_map.insert(
         "L".to_string(),
         Commented::new(CommentedValueKind::Str("42".into())),
     );
-    let mut outer_map = HashMap::new();
+    let mut outer_map = IndexMap::new();
     outer_map.insert(
         "false".to_string(),
         Commented::new(CommentedValueKind::Int(-1)),
@@ -172,9 +172,9 @@ fn ser_multi_key_nested_map() {
 fn ser_proptest_repro() {
     // Exact reproduction of proptest failure
     use ayml_serde::Commented;
-    use std::collections::HashMap;
+    use indexmap::IndexMap;
 
-    let mut inner_map = HashMap::new();
+    let mut inner_map = IndexMap::new();
     inner_map.insert(
         "L".to_string(),
         CommentedValue {
@@ -184,7 +184,7 @@ fn ser_proptest_repro() {
         },
     );
 
-    let mut outer_map = HashMap::new();
+    let mut outer_map = IndexMap::new();
     outer_map.insert(
         "false".to_string(),
         Commented::new(CommentedValueKind::Int(-1)),
@@ -225,9 +225,9 @@ fn ser_commented_then_nested_map() {
         third: ayml_serde::Commented<CommentedValueKind>,
     }
     use ayml_serde::Commented;
-    use std::collections::HashMap;
+    use indexmap::IndexMap;
 
-    let mut inner_map = HashMap::new();
+    let mut inner_map = IndexMap::new();
     inner_map.insert(
         "L".to_string(),
         CommentedValue {
@@ -259,8 +259,8 @@ fn ser_commented_then_nested_map() {
 #[test]
 fn ser_nested_map_with_top_comment() {
     use ayml_serde::Commented;
-    use std::collections::HashMap;
-    let mut inner_map = HashMap::new();
+    use indexmap::IndexMap;
+    let mut inner_map = IndexMap::new();
     inner_map.insert(
         "L".to_string(),
         CommentedValue {
@@ -269,7 +269,7 @@ fn ser_nested_map_with_top_comment() {
             value: CommentedValueKind::Str("42".into()),
         },
     );
-    let mut outer_map = HashMap::new();
+    let mut outer_map = IndexMap::new();
     outer_map.insert(
         "false".to_string(),
         Commented::new(CommentedValueKind::Int(-1)),

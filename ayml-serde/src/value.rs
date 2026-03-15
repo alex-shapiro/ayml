@@ -1,8 +1,8 @@
 //! An untyped AYML value, analogous to `serde_json::Value`.
 
+use indexmap::IndexMap;
 use serde::Serialize;
 use serde::de::{self, Deserializer, Visitor};
-use std::collections::HashMap;
 use std::fmt;
 
 /// An untyped AYML value that can represent any AYML document.
@@ -35,7 +35,7 @@ pub enum Value {
     /// AYML sequence (`- ` items or `[...]` flow).
     Seq(Vec<Value>),
     /// AYML mapping (`key: value` pairs or `{...}` flow).
-    Map(HashMap<String, Value>),
+    Map(IndexMap<String, Value>),
 }
 
 // ── Deserialize ─────────────────────────────────────────────────────
@@ -92,7 +92,7 @@ impl<'de> Visitor<'de> for ValueVisitor {
     }
 
     fn visit_map<A: de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
-        let mut entries = HashMap::new();
+        let mut entries = IndexMap::new();
         while let Some((key, value)) = map.next_entry()? {
             entries.insert(key, value);
         }
@@ -117,7 +117,9 @@ impl PartialEq for Value {
     }
 }
 
-impl Eq for Value {}
+// Note: `Eq` is intentionally not implemented because `Value` can contain
+// `Float(f64)` and floats do not satisfy the `Eq` contract (transitivity).
+// The custom `PartialEq` treats NaN == NaN for testing convenience.
 
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

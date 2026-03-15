@@ -1,8 +1,8 @@
 //! Property-based tests for ayml-serde roundtrip and robustness.
 
 use ayml_serde::{Value, from_str, to_string};
+use indexmap::IndexMap;
 use proptest::prelude::*;
-use std::collections::HashMap;
 
 // ── Generators ───────────────────────────────────────────────────
 
@@ -133,7 +133,7 @@ fn arb_value(depth: u32) -> impl Strategy<Value = Value> {
                     0..5
                 )
                 .prop_map(|entries| {
-                    let map: HashMap<String, Value> = entries.into_iter().collect();
+                    let map: IndexMap<String, Value> = entries.into_iter().collect();
                     Value::Map(map)
                 }),
         ]
@@ -180,5 +180,29 @@ proptest! {
     #[test]
     fn serializer_no_panic(value in arb_value(3)) {
         let _ = to_string(&value);
+    }
+
+    /// Multi-line strings roundtrip through triple-quoted serialization.
+    #[test]
+    fn multiline_string_roundtrip(
+        lines in prop::collection::vec("[a-zA-Z0-9 .!?]{0,40}", 1..6),
+    ) {
+        let s = lines.join("\n");
+        let serialized = to_string(&s).unwrap();
+        let deserialized: String = from_str(&serialized).unwrap();
+        prop_assert_eq!(s, deserialized);
+    }
+
+    /// Option<i64> roundtrips through flow sequences (covers null before `,`/`]`).
+    #[test]
+    fn option_in_flow_seq_roundtrip(
+        vals in prop::collection::vec(
+            prop_oneof![Just(None), any::<i64>().prop_map(Some)],
+            0..6,
+        )
+    ) {
+        let serialized = to_string(&vals).unwrap();
+        let deserialized: Vec<Option<i64>> = from_str(&serialized).unwrap();
+        prop_assert_eq!(vals, deserialized);
     }
 }

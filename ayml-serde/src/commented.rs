@@ -36,7 +36,7 @@ pub(crate) const FIELD_VALUE: &str = "__value__";
 /// When serialized back to AYML, comments are emitted in their original
 /// positions. For non-AYML serializers, the comments are serialized as
 /// struct fields and are losslessly preserved.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Commented<T> {
     /// Comment line(s) preceding the value. Multi-line comments are
     /// joined with `\n`. Does not include the `# ` prefix.

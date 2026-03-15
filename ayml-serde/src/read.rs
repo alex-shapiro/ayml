@@ -86,8 +86,17 @@ impl<R: std::io::Read> IoRead<R> {
     }
 }
 
+/// Maximum buffer size for `IoRead` (256 MiB). Prevents OOM from
+/// unbounded input when reading from an `io::Read` source.
+const MAX_IO_BUF: usize = 256 * 1024 * 1024;
+
 impl<R: std::io::Read> Read<'_> for IoRead<R> {
     fn fill_to(&mut self, pos: usize) -> Result<bool> {
+        if pos > MAX_IO_BUF {
+            return Err(Error::Message(format!(
+                "input exceeds maximum size ({MAX_IO_BUF} bytes)"
+            )));
+        }
         while self.buf.len() < pos && !self.done {
             let mut tmp = [0u8; 4096];
             let n = self.reader.read(&mut tmp).map_err(Error::from)?;

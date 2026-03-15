@@ -387,6 +387,148 @@ fn de_serde_flatten() {
 // ── Ignored fields ──────────────────────────────────────────────
 
 #[test]
+fn de_option_null_in_flow_seq() {
+    let v: Vec<Option<i32>> = from_str("[null, 42]").unwrap();
+    assert_eq!(v, vec![None, Some(42)]);
+}
+
+#[test]
+fn de_option_null_in_flow_map() {
+    let m: HashMap<String, Option<i32>> = from_str("{x: null, y: 1}").unwrap();
+    assert_eq!(m["x"], None);
+    assert_eq!(m["y"], Some(1));
+}
+
+#[test]
+fn de_option_null_before_closing_bracket() {
+    let v: Vec<Option<i32>> = from_str("[null]").unwrap();
+    assert_eq!(v, vec![None]);
+}
+
+#[test]
+fn de_option_null_before_closing_brace() {
+    let m: HashMap<String, Option<i32>> = from_str("{x: null}").unwrap();
+    assert_eq!(m["x"], None);
+}
+
+#[test]
+fn de_triple_quoted_basic() {
+    let input = "value: \"\"\"\n  hello world\n  \"\"\"";
+    #[derive(Deserialize, Debug, PartialEq)]
+    struct S {
+        value: String,
+    }
+    let s: S = from_str(input).unwrap();
+    assert_eq!(s.value, "hello world");
+}
+
+#[test]
+fn de_triple_quoted_multiline() {
+    let input = "msg: \"\"\"\n  line one\n  line two\n  \"\"\"";
+    #[derive(Deserialize, Debug, PartialEq)]
+    struct S {
+        msg: String,
+    }
+    let s: S = from_str(input).unwrap();
+    assert_eq!(s.msg, "line one\nline two");
+}
+
+#[test]
+fn de_triple_quoted_with_escape() {
+    let input = "msg: \"\"\"\n  hello\\nworld\n  \"\"\"";
+    #[derive(Deserialize, Debug, PartialEq)]
+    struct S {
+        msg: String,
+    }
+    let s: S = from_str(input).unwrap();
+    assert_eq!(s.msg, "hello\nworld");
+}
+
+#[test]
+fn de_triple_quoted_line_continuation() {
+    let input = "msg: \"\"\"\n  hello \\\n  world\n  \"\"\"";
+    #[derive(Deserialize, Debug, PartialEq)]
+    struct S {
+        msg: String,
+    }
+    let s: S = from_str(input).unwrap();
+    assert_eq!(s.msg, "hello world");
+}
+
+#[test]
+fn de_triple_quoted_blank_line() {
+    let input = "msg: \"\"\"\n  line one\n\n  line two\n  \"\"\"";
+    #[derive(Deserialize, Debug, PartialEq)]
+    struct S {
+        msg: String,
+    }
+    let s: S = from_str(input).unwrap();
+    assert_eq!(s.msg, "line one\n\nline two");
+}
+
+#[test]
+fn de_triple_quoted_top_level() {
+    let input = "\"\"\"\n  just text\n  \"\"\"";
+    let s: String = from_str(input).unwrap();
+    assert_eq!(s, "just text");
+}
+
+#[test]
+fn de_triple_quoted_with_hash() {
+    // # inside triple-quoted string is NOT a comment
+    let input = "code: \"\"\"\n  x = foo(bar) # not a comment\n  \"\"\"";
+    #[derive(Deserialize, Debug, PartialEq)]
+    struct S {
+        code: String,
+    }
+    let s: S = from_str(input).unwrap();
+    assert_eq!(s.code, "x = foo(bar) # not a comment");
+}
+
+#[test]
+fn de_depth_limit_nested_enums() {
+    // Deeply nested enum mappings should hit the depth limit
+    #[derive(Deserialize, Debug)]
+    enum E {
+        A(Box<E>),
+        #[allow(dead_code)]
+        B,
+    }
+    // 200 levels of nesting via block enum mappings
+    let mut input = String::new();
+    for _ in 0..200 {
+        input.push_str("A: ");
+    }
+    input.push_str("B");
+    let err = from_str::<E>(&input);
+    assert!(err.is_err(), "should have hit depth limit");
+    assert!(
+        err.unwrap_err().to_string().contains("nesting depth"),
+        "wrong error type"
+    );
+}
+
+#[test]
+fn de_io_read_buffer_limit() {
+    // Simulate a reader that would produce very large input
+    struct InfiniteReader;
+    impl std::io::Read for InfiniteReader {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            // Fill buffer with spaces (valid AYML whitespace, forcing fill_to to keep reading)
+            buf.fill(b' ');
+            Ok(buf.len())
+        }
+    }
+    let err = ayml_serde::from_reader::<_, i32>(InfiniteReader);
+    assert!(err.is_err());
+    let msg = err.unwrap_err().to_string();
+    assert!(
+        msg.contains("maximum size"),
+        "expected buffer limit error, got: {msg}"
+    );
+}
+
+#[test]
 fn de_ignore_unknown_fields() {
     #[derive(Deserialize, Debug, PartialEq)]
     struct Config {

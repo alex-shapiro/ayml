@@ -5,10 +5,10 @@
 //! (sequences and mappings) are themselves `CommentedValue`s.
 
 use crate::Commented;
+use indexmap::IndexMap;
 use serde::de::{self, Visitor};
 use serde::ser;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::collections::HashMap;
 use std::fmt;
 
 /// An untyped AYML value where every node preserves its comments.
@@ -33,7 +33,7 @@ pub enum CommentedValueKind {
     Float(f64),
     Str(String),
     Seq(Vec<CommentedValue>),
-    Map(HashMap<String, CommentedValue>),
+    Map(IndexMap<String, CommentedValue>),
 }
 
 // ── Serialize ───────────────────────────────────────────────────────
@@ -120,7 +120,7 @@ impl<'de> Visitor<'de> for CommentedValueKindVisitor {
     }
 
     fn visit_map<A: de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
-        let mut entries = HashMap::new();
+        let mut entries = IndexMap::new();
         while let Some((key, value)) = map.next_entry()? {
             entries.insert(key, value);
         }
@@ -145,7 +145,8 @@ impl PartialEq for CommentedValueKind {
     }
 }
 
-impl Eq for CommentedValueKind {}
+// Note: `Eq` is intentionally not implemented because `CommentedValueKind`
+// can contain `Float(f64)`. See `Value` for details.
 
 // ── Display ─────────────────────────────────────────────────────────
 

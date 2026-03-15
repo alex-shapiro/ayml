@@ -70,11 +70,6 @@ pub(crate) struct Deserializer<R> {
     /// Current parsing context — flow collections set this to Flow so
     /// bare string scanning stops at `,`, `]`, `}`.
     ctx: Context,
-    /// Scratch buffer for building strings that require escape processing.
-    /// Bare strings that need no processing can borrow directly from input
-    /// (zero-copy path, to be wired up in a future pass).
-    #[allow(dead_code)]
-    scratch: Vec<u8>,
     /// Set to true when we're reading a mapping key, to prevent
     /// `deserialize_any` from re-detecting the colon as a new mapping.
     reading_key: bool,
@@ -90,7 +85,7 @@ impl<'a> Deserializer<StrRead<'a>> {
         Self {
             read: StrRead::new(s),
             ctx: Context::Block,
-            scratch: Vec::new(),
+
             reading_key: false,
             pending_top_comment: None,
             depth: 0,
@@ -103,7 +98,7 @@ impl<R: std::io::Read> Deserializer<IoRead<R>> {
         Self {
             read: IoRead::new(rdr),
             ctx: Context::Block,
-            scratch: Vec::new(),
+
             reading_key: false,
             pending_top_comment: None,
             depth: 0,
@@ -396,6 +391,19 @@ impl<'de, R: Read<'de>> Deserializer<R> {
 
     // ── Scalar scanning ──────────────────────────────────────────
 
+    /// Scan a quoted string — either double-quoted (`"..."`) or
+    /// triple-quoted (`"""..."""`). Detects which form by lookahead.
+    fn scan_quoted_string(&mut self) -> Result<String> {
+        // Check for triple-quote: `"""`  followed by a line break
+        if self.peek_nth(1)? == Some('"') && self.peek_nth(2)? == Some('"') {
+            let after = self.peek_nth(3)?;
+            if after == Some('\n') || after == Some('\r') || after.is_none() {
+                return self.scan_triple_quoted();
+            }
+        }
+        self.scan_double_quoted()
+    }
+
     /// Scan a double-quoted string, returning the decoded content.
     fn scan_double_quoted(&mut self) -> Result<String> {
         let start = self.offset();
@@ -430,6 +438,163 @@ impl<'de, R: Read<'de>> Deserializer<R> {
                 }
             }
         }
+    }
+
+    /// Scan a triple-quoted string (`"""..."""`).
+    ///
+    /// The opening `"""` must be followed by a line break. Content lines
+    /// are collected until a line containing only indentation + `"""` is
+    /// found. The closing `"""`'s indentation determines how many leading
+    /// spaces are stripped from each content line. Escape sequences are
+    /// processed. `\` at end-of-line is a line continuation.
+    #[allow(clippy::too_many_lines)]
+    fn scan_triple_quoted(&mut self) -> Result<String> {
+        let start = self.offset();
+        // Consume opening `"""`
+        self.advance()?;
+        self.advance()?;
+        self.advance()?;
+
+        // Must be followed by a line break
+        if !self.eat_break()? {
+            return Err(self.error_at("expected line break after opening `\"\"\"`", start));
+        }
+
+        // Collect raw content lines until closing `"""`
+        let mut raw_lines: Vec<String> = Vec::new();
+        let closing_indent;
+
+        loop {
+            if self.is_eof()? {
+                return Err(self.error_at("unexpected end of input in triple-quoted string", start));
+            }
+
+            // Count leading spaces
+            let spaces = self.count_spaces()?;
+
+            // Check if this line is the closing `"""`
+            let off = self.offset() + spaces;
+            self.read.fill_to(off + 3)?;
+            let input = self.read.input();
+            if input[off..].starts_with("\"\"\"") {
+                // Verify it's followed by end-of-line, whitespace, comment, or EOF
+                let after_close = &input[off + 3..];
+                if after_close.is_empty()
+                    || after_close.starts_with('\n')
+                    || after_close.starts_with('\r')
+                    || after_close.starts_with(' ')
+                    || after_close.starts_with('\t')
+                    || after_close.starts_with('#')
+                {
+                    closing_indent = spaces;
+                    self.set_offset(off + 3);
+                    break;
+                }
+            }
+
+            // Content line: read to end of line
+            let line_start = self.offset();
+            self.read.fill_to(line_start + spaces)?;
+            // Don't advance past spaces yet — collect the whole raw line
+            let line_off = self.offset();
+            self.rest_of_line()?;
+            let line_end = self.offset();
+            let line = self.read.input()[line_off..line_end].to_string();
+            raw_lines.push(line);
+
+            if !self.eat_break()? && !self.is_eof()? {
+                return Err(self.error("expected line break in triple-quoted string"));
+            }
+        }
+
+        // Process: strip indentation, handle escapes, line continuations
+        let mut result = String::new();
+        for (i, line) in raw_lines.iter().enumerate() {
+            if i > 0 {
+                result.push('\n');
+            }
+
+            // Strip leading indentation (closing_indent spaces)
+            let stripped = if line.len() >= closing_indent
+                && line.as_bytes()[..closing_indent].iter().all(|&b| b == b' ')
+            {
+                &line[closing_indent..]
+            } else if line.trim().is_empty() {
+                ""
+            } else {
+                line.as_str()
+            };
+
+            // Process escape sequences
+            let mut chars = stripped.chars().peekable();
+            while let Some(ch) = chars.next() {
+                if ch == '\\' {
+                    if chars.peek().is_none() {
+                        // `\` at end of line → line continuation sentinel
+                        result.push('\x00');
+                        continue;
+                    }
+                    match chars.next() {
+                        Some('0') => result.push('\0'),
+                        Some('a') => result.push('\x07'),
+                        Some('b') => result.push('\x08'),
+                        Some('t') => result.push('\t'),
+                        Some('n') => result.push('\n'),
+                        Some('v') => result.push('\x0B'),
+                        Some('f') => result.push('\x0C'),
+                        Some('r') => result.push('\r'),
+                        Some('e') => result.push('\x1B'),
+                        Some(' ') => result.push(' '),
+                        Some('"') => result.push('"'),
+                        Some('/') => result.push('/'),
+                        Some('\\') => result.push('\\'),
+                        Some('x') => {
+                            let ch = Self::take_hex_from_chars(&mut chars, 2)
+                                .map_err(|()| self.error_at("invalid hex escape", start))?;
+                            result.push(ch);
+                        }
+                        Some('u') => {
+                            let ch = Self::take_hex_from_chars(&mut chars, 4)
+                                .map_err(|()| self.error_at("invalid unicode escape", start))?;
+                            result.push(ch);
+                        }
+                        Some('U') => {
+                            let ch = Self::take_hex_from_chars(&mut chars, 8)
+                                .map_err(|()| self.error_at("invalid unicode escape", start))?;
+                            result.push(ch);
+                        }
+                        Some(c) => {
+                            return Err(self.error_at(&format!("invalid escape: \\{c}"), start));
+                        }
+                        None => {
+                            return Err(self.error_at("unexpected end of escape", start));
+                        }
+                    }
+                } else {
+                    result.push(ch);
+                }
+            }
+        }
+
+        // Apply line continuations: \<newline> joins lines
+        Ok(result.replace("\x00\n", ""))
+    }
+
+    /// Take `n` hex digits from a char iterator and decode to a char.
+    fn take_hex_from_chars(
+        chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+        n: usize,
+    ) -> std::result::Result<char, ()> {
+        let mut value: u32 = 0;
+        for _ in 0..n {
+            match chars.next() {
+                Some(ch) if ch.is_ascii_hexdigit() => {
+                    value = value * 16 + ch.to_digit(16).unwrap();
+                }
+                _ => return Err(()),
+            }
+        }
+        char::from_u32(value).ok_or(())
     }
 
     /// Parse a double-quoted escape sequence (after consuming the `\`).
@@ -480,8 +645,19 @@ impl<'de, R: Read<'de>> Deserializer<R> {
     fn scan_bare_string(&mut self, ctx: Context) -> Result<String> {
         let start = self.offset();
 
-        // ns-plain-first-char
+        // ns-plain-first-char: `-` and `:` require a following ns-char
         match self.peek()? {
+            Some('-' | ':') => {
+                let next = self.peek_nth(1)?;
+                match next {
+                    Some(c) if !c.is_ascii_whitespace() && is_printable(c) => {
+                        self.advance()?;
+                    }
+                    _ => {
+                        return Err(self.error("unexpected character"));
+                    }
+                }
+            }
             Some(ch) if is_plain_first(ch) => {
                 self.advance()?;
             }
@@ -544,7 +720,7 @@ impl<'de, R: Read<'de>> Deserializer<R> {
     /// Scan the next scalar value as a string (quoted or bare).
     fn scan_scalar_string(&mut self, ctx: Context) -> Result<String> {
         match self.peek()? {
-            Some('"') => self.scan_double_quoted(),
+            Some('"') => self.scan_quoted_string(),
             _ => self.scan_bare_string(ctx),
         }
     }
@@ -629,7 +805,7 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
         match self.peek()? {
             Some('"') => {
                 let start = self.offset();
-                let s = self.scan_double_quoted()?;
+                let s = self.scan_quoted_string()?;
                 // Check if this is a mapping key (but not if we're already reading a key,
                 // and not in flow context where maps use explicit `{}`).
                 if !self.reading_key && self.ctx == Context::Block {
@@ -650,28 +826,28 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
                 self.advance()?;
                 let prev_ctx = self.ctx;
                 self.enter_collection()?;
-                let value = visitor.visit_seq(SeqAccess::new(self, SeqStyle::Flow));
+                let result = visitor.visit_seq(SeqAccess::new(self, SeqStyle::Flow));
                 self.leave_collection();
-                let value = value?;
+                self.ctx = prev_ctx;
+                let value = result?;
                 self.skip_whitespace_and_comments()?;
                 if !self.eat(']')? {
                     return Err(self.error("expected `]` to close sequence"));
                 }
-                self.ctx = prev_ctx;
                 Ok(value)
             }
             Some('{') => {
                 self.advance()?;
                 let prev_ctx = self.ctx;
                 self.enter_collection()?;
-                let value = visitor.visit_map(MapAccess::new(self, MapStyle::Flow));
+                let result = visitor.visit_map(MapAccess::new(self, MapStyle::Flow));
                 self.leave_collection();
-                let value = value?;
+                self.ctx = prev_ctx;
+                let value = result?;
                 self.skip_whitespace_and_comments()?;
                 if !self.eat('}')? {
                     return Err(self.error("expected `}` to close mapping"));
                 }
-                self.ctx = prev_ctx;
                 Ok(value)
             }
             Some('-') if self.ctx == Context::Block && self.peek_nth(1)? == Some(' ') => {
@@ -830,6 +1006,9 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
                     || after[0] == b'\n'
                     || after[0] == b'\r'
                     || after[0] == b'#'
+                    || after[0] == b','
+                    || after[0] == b']'
+                    || after[0] == b'}'
             } else {
                 false
             }
@@ -874,14 +1053,14 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
             Some('[') => {
                 self.advance()?;
                 let prev_ctx = self.ctx;
-                let value = visitor.visit_seq(SeqAccess::new(self, SeqStyle::Flow));
+                let result = visitor.visit_seq(SeqAccess::new(self, SeqStyle::Flow));
                 self.leave_collection();
-                let value = value?;
+                self.ctx = prev_ctx;
+                let value = result?;
                 self.skip_whitespace_and_comments()?;
                 if !self.eat(']')? {
                     return Err(self.error("expected `]` to close sequence"));
                 }
-                self.ctx = prev_ctx;
                 Ok(value)
             }
             Some('-') if self.peek_nth(1)? == Some(' ') => {
@@ -916,14 +1095,14 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
         if let Some('{') = self.peek()? {
             self.advance()?;
             let prev_ctx = self.ctx;
-            let value = visitor.visit_map(MapAccess::new(self, MapStyle::Flow));
+            let result = visitor.visit_map(MapAccess::new(self, MapStyle::Flow));
             self.leave_collection();
-            let value = value?;
+            self.ctx = prev_ctx;
+            let value = result?;
             self.skip_whitespace_and_comments()?;
             if !self.eat('}')? {
                 return Err(self.error("expected `}` to close mapping"));
             }
-            self.ctx = prev_ctx;
             Ok(value)
         } else {
             let indent = self.current_indent();
@@ -957,16 +1136,19 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
             self.advance()?; // eat '{'
             let prev_ctx = self.ctx;
             self.ctx = Context::Flow;
+            self.enter_collection()?;
             self.skip_whitespace_and_comments()?;
-            let value = visitor.visit_enum(EnumAccess {
+            let result = visitor.visit_enum(EnumAccess {
                 de: self,
                 style: EnumStyle::Mapping,
-            })?;
+            });
+            self.leave_collection();
+            self.ctx = prev_ctx;
+            let value = result?;
             self.skip_whitespace_and_comments()?;
             if !self.eat('}')? {
                 return Err(self.error("expected `}` to close enum mapping"));
             }
-            self.ctx = prev_ctx;
             Ok(value)
         } else {
             // Could be a unit variant (bare string) or block mapping (key: value).
@@ -977,10 +1159,13 @@ impl<'de, R: Read<'de>> de::Deserializer<'de> for &mut Deserializer<R> {
             if self.is_mapping_value_indicator()? {
                 // Block mapping style: VariantName: value
                 self.set_offset(start);
-                visitor.visit_enum(EnumAccess {
+                self.enter_collection()?;
+                let value = visitor.visit_enum(EnumAccess {
                     de: self,
                     style: EnumStyle::Mapping,
-                })
+                });
+                self.leave_collection();
+                value
             } else {
                 // Unit variant: just a bare string
                 self.set_offset(start);

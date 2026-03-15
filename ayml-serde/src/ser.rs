@@ -86,6 +86,36 @@ impl<W: std::io::Write> Serializer<W> {
         Ok(())
     }
 
+    /// Write a triple-quoted string. The closing `"""` is indented to
+    /// match `self.indent`, and each content line is indented accordingly.
+    fn write_triple_quoted(&mut self, v: &str) -> Result<()> {
+        // If after_key, the `"""` follows the key on the same line
+        if self.after_key {
+            self.write_str(" ")?;
+            self.after_key = false;
+        }
+        self.write_str("\"\"\"\n")?;
+        let content_indent = self.indent + 2;
+        for line in v.split('\n') {
+            if line.is_empty() {
+                self.write_str("\n")?;
+            } else {
+                for _ in 0..content_indent {
+                    self.write_str(" ")?;
+                }
+                // Escape characters that need escaping in triple-quoted strings
+                // (same as double-quoted, except `"` doesn't need escaping
+                // and `\n` is represented by actual newlines)
+                write_triple_quoted_line(&mut self.writer, line)?;
+                self.write_str("\n")?;
+            }
+        }
+        for _ in 0..content_indent {
+            self.write_str(" ")?;
+        }
+        self.write_str("\"\"\"")
+    }
+
     /// If a sequence dash is pending, write "- " now. The caller is
     /// responsible for any preceding indentation.
     fn flush_pending_dash(&mut self) -> Result<()> {
@@ -214,6 +244,9 @@ impl<'a, W: std::io::Write> ser::Serializer for &'a mut Serializer<W> {
         self.scalar_prefix()?;
         if v.is_empty() {
             return self.write_str(r#""""#);
+        }
+        if v.contains('\n') {
+            return self.write_triple_quoted(v);
         }
         if needs_quoting(v) {
             write_quoted(&mut self.writer, v).map_err(Error::from)
@@ -943,6 +976,41 @@ fn write_quoted<W: std::io::Write>(w: &mut W, s: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Write a single line of triple-quoted string content, escaping control
+/// characters but allowing `"` and `#` to pass through literally.
+fn write_triple_quoted_line<W: std::io::Write>(w: &mut W, line: &str) -> std::io::Result<()> {
+    for ch in line.chars() {
+        match ch {
+            '\0' => w.write_all(b"\\0")?,
+            '\x07' => w.write_all(b"\\a")?,
+            '\x08' => w.write_all(b"\\b")?,
+            '\t' => w.write_all(b"\\t")?,
+            // \n shouldn't appear here (lines are split on \n)
+            '\x0B' => w.write_all(b"\\v")?,
+            '\x0C' => w.write_all(b"\\f")?,
+            '\r' => w.write_all(b"\\r")?,
+            '\x1B' => w.write_all(b"\\e")?,
+            '\\' => w.write_all(b"\\\\")?,
+            c if c.is_control() => {
+                let cp = c as u32;
+                if cp <= 0xFF {
+                    write!(w, "\\x{cp:02x}")?;
+                } else if cp <= 0xFFFF {
+                    write!(w, "\\u{cp:04x}")?;
+                } else {
+                    write!(w, "\\U{cp:08x}")?;
+                }
+            }
+            c => {
+                let mut buf = [0u8; 4];
+                let s = c.encode_utf8(&mut buf);
+                w.write_all(s.as_bytes())?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Write a mapping key, quoting if necessary.
 fn write_key<W: std::io::Write>(w: &mut W, key: &str) -> Result<()> {
     if key.is_empty() || needs_quoting(key) {
@@ -1017,7 +1085,10 @@ mod tests {
 
     #[test]
     fn test_string_escapes() {
-        assert_eq!(to_string(&"line\nbreak").unwrap(), "\"line\\nbreak\"\n");
+        assert_eq!(
+            to_string(&"line\nbreak").unwrap(),
+            "\"\"\"\n  line\n  break\n  \"\"\"\n"
+        );
         assert_eq!(to_string(&"say \"hi\"").unwrap(), "\"say \\\"hi\\\"\"\n");
         assert_eq!(to_string(&"back\\slash").unwrap(), "\"back\\\\slash\"\n");
         assert_eq!(to_string(&"\x00null").unwrap(), "\"\\0null\"\n");
@@ -1081,7 +1152,8 @@ mod tests {
     #[test]
     fn test_char() {
         assert_eq!(to_string(&'a').unwrap(), "a\n");
-        assert_eq!(to_string(&'\n').unwrap(), "\"\\n\"\n");
+        // char '\n' is a single-char string containing a newline → triple-quoted
+        assert_eq!(to_string(&'\n').unwrap(), "\"\"\"\n\n\n  \"\"\"\n");
         assert_eq!(to_string(&'"').unwrap(), "\"\\\"\"\n");
     }
 
