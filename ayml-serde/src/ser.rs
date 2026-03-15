@@ -77,6 +77,28 @@ impl<W: std::io::Write> Serializer<W> {
         }
         Ok(())
     }
+
+    /// Write the prefix for an enum variant key (Variant: ...).
+    /// Handles after_key/compact like Compound::write_key_prefix.
+    /// Returns true if indent was bumped by 2.
+    fn variant_key_prefix(&mut self, variant: &str) -> Result<bool> {
+        let bumped = if self.after_key {
+            self.write_str("\n")?;
+            self.after_key = false;
+            self.indent += 2;
+            self.write_indent()?;
+            true
+        } else if self.compact {
+            self.compact = false;
+            false
+        } else {
+            false
+        };
+        write_key(&mut self.writer, variant)?;
+        self.write_str(":")?;
+        self.after_key = true;
+        Ok(bumped)
+    }
 }
 
 impl<'a, W: std::io::Write> ser::Serializer for &'a mut Serializer<W> {
@@ -227,17 +249,19 @@ impl<'a, W: std::io::Write> ser::Serializer for &'a mut Serializer<W> {
         variant: &'static str,
         value: &T,
     ) -> Result<()> {
-        self.scalar_prefix()?;
-        write_key(&mut self.writer, variant)?;
-        self.write_str(":")?;
-        self.after_key = true;
-        value.serialize(self)
+        let bumped = self.variant_key_prefix(variant)?;
+        value.serialize(&mut *self)?;
+        if bumped {
+            self.indent -= 2;
+        }
+        Ok(())
     }
 
     fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq> {
         Ok(SeqState {
             ser: self,
             first: true,
+            bumped: false,
         })
     }
 
@@ -260,11 +284,10 @@ impl<'a, W: std::io::Write> ser::Serializer for &'a mut Serializer<W> {
         variant: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeTupleVariant> {
-        self.scalar_prefix()?;
-        write_key(&mut self.writer, variant)?;
-        self.write_str(":")?;
-        self.after_key = true;
-        self.serialize_seq(None)
+        let bumped = self.variant_key_prefix(variant)?;
+        let mut seq = self.serialize_seq(None)?;
+        seq.bumped = bumped;
+        Ok(seq)
     }
 
     fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap> {
@@ -272,6 +295,7 @@ impl<'a, W: std::io::Write> ser::Serializer for &'a mut Serializer<W> {
             ser: self,
             first: true,
             bumped: false,
+            variant_bumped: false,
         })
     }
 
@@ -286,11 +310,10 @@ impl<'a, W: std::io::Write> ser::Serializer for &'a mut Serializer<W> {
         variant: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeStructVariant> {
-        self.scalar_prefix()?;
-        write_key(&mut self.writer, variant)?;
-        self.write_str(":")?;
-        self.after_key = true;
-        self.serialize_map(None)
+        let bumped = self.variant_key_prefix(variant)?;
+        let mut compound = self.serialize_map(None)?;
+        compound.variant_bumped = bumped;
+        Ok(compound)
     }
 }
 
@@ -299,6 +322,8 @@ impl<'a, W: std::io::Write> ser::Serializer for &'a mut Serializer<W> {
 struct SeqState<'a, W> {
     ser: &'a mut Serializer<W>,
     first: bool,
+    /// True if we bumped indent for a variant key prefix.
+    bumped: bool,
 }
 
 impl<W: std::io::Write> ser::SerializeSeq for SeqState<'_, W> {
@@ -338,6 +363,9 @@ impl<W: std::io::Write> ser::SerializeSeq for SeqState<'_, W> {
                 self.ser.after_key = false;
             }
             self.ser.write_str("[]")?;
+        }
+        if self.bumped {
+            self.ser.indent -= 2;
         }
         Ok(())
     }
@@ -389,6 +417,8 @@ struct Compound<'a, W> {
     first: bool,
     /// True if we bumped indent by 2 for a nested mapping after "key:".
     bumped: bool,
+    /// True if variant_key_prefix already bumped indent (for struct variants).
+    variant_bumped: bool,
 }
 
 impl<W: std::io::Write> Compound<'_, W> {
@@ -423,6 +453,9 @@ impl<W: std::io::Write> Compound<'_, W> {
             self.ser.write_str("{}")?;
         }
         if self.bumped {
+            self.ser.indent -= 2;
+        }
+        if self.variant_bumped {
             self.ser.indent -= 2;
         }
         Ok(())
@@ -1004,5 +1037,92 @@ ports:
             label: Some("prod".into()),
         };
         assert_eq!(to_string(&c2).unwrap(), "name: app\nlabel: prod\n");
+    }
+
+    // ── Enum tests ──────────────────────────────────────────────
+
+    #[test]
+    fn test_enum_newtype_variant() {
+        #[derive(serde::Serialize)]
+        enum Shape {
+            Circle(f64),
+            Label(String),
+        }
+        assert_eq!(to_string(&Shape::Circle(3.14)).unwrap(), "Circle: 3.14\n");
+        assert_eq!(
+            to_string(&Shape::Label("hi".into())).unwrap(),
+            "Label: hi\n"
+        );
+    }
+
+    #[test]
+    fn test_enum_tuple_variant() {
+        #[derive(serde::Serialize)]
+        enum Cmd {
+            Move(i32, i32),
+        }
+        assert_eq!(
+            to_string(&Cmd::Move(10, 20)).unwrap(),
+            "Move:\n- 10\n- 20\n"
+        );
+    }
+
+    #[test]
+    fn test_enum_struct_variant() {
+        #[derive(serde::Serialize)]
+        enum Shape {
+            Rect { w: u32, h: u32 },
+        }
+        assert_eq!(
+            to_string(&Shape::Rect { w: 10, h: 20 }).unwrap(),
+            "Rect:\n  w: 10\n  h: 20\n"
+        );
+    }
+
+    #[test]
+    fn test_enum_in_struct() {
+        #[derive(serde::Serialize)]
+        #[allow(dead_code)]
+        enum Status {
+            Active,
+            Inactive,
+        }
+        #[derive(serde::Serialize)]
+        struct User {
+            name: String,
+            status: Status,
+        }
+        let u = User {
+            name: "Alice".into(),
+            status: Status::Active,
+        };
+        assert_eq!(to_string(&u).unwrap(), "name: Alice\nstatus: Active\n");
+    }
+
+    #[test]
+    fn test_enum_unit_in_seq() {
+        #[derive(serde::Serialize)]
+        enum Color {
+            Red,
+            Blue,
+        }
+        let v = vec![Color::Red, Color::Blue];
+        assert_eq!(to_string(&v).unwrap(), "- Red\n- Blue\n");
+    }
+
+    #[test]
+    fn test_enum_newtype_in_struct() {
+        #[derive(serde::Serialize)]
+        enum Value {
+            Num(i32),
+        }
+        #[derive(serde::Serialize)]
+        struct Config {
+            val: Value,
+        }
+        let c = Config {
+            val: Value::Num(42),
+        };
+        assert_eq!(to_string(&c).unwrap(), "val:\n  Num: 42\n");
     }
 }
