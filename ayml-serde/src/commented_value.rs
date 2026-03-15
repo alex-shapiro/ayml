@@ -168,10 +168,15 @@ impl fmt::Display for CommentedValueKind {
                         write!(f, "-inf")
                     }
                 } else {
-                    write!(f, "{v}")
+                    let s = format!("{v}");
+                    if s.contains('.') || s.contains('e') || s.contains('E') {
+                        write!(f, "{s}")
+                    } else {
+                        write!(f, "{s}.0")
+                    }
                 }
             }
-            Self::Str(s) => write!(f, "{s}"),
+            Self::Str(s) => display_str(f, s),
             Self::Seq(v) => {
                 write!(f, "[")?;
                 for (i, item) in v.iter().enumerate() {
@@ -188,7 +193,8 @@ impl fmt::Display for CommentedValueKind {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{k}: {}", v.value)?;
+                    display_str(f, k)?;
+                    write!(f, ": {}", v.value)?;
                 }
                 write!(f, "}}")
             }
@@ -200,4 +206,50 @@ impl fmt::Display for CommentedValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.value.fmt(f)
     }
+}
+
+/// Display a string, quoting it if it could be ambiguous with other AYML types.
+fn display_str(f: &mut fmt::Formatter<'_>, s: &str) -> fmt::Result {
+    let needs_quoting = matches!(
+        s,
+        "null" | "true" | "false" | "inf" | "+inf" | "-inf" | "nan"
+    ) || s.is_empty()
+        || s.contains(['"', '\\', '\n', ':', ',', '[', ']', '{', '}', '#'])
+        || looks_like_number(s);
+    if needs_quoting {
+        write!(f, "\"")?;
+        for ch in s.chars() {
+            match ch {
+                '"' => write!(f, "\\\"")?,
+                '\\' => write!(f, "\\\\")?,
+                '\n' => write!(f, "\\n")?,
+                '\r' => write!(f, "\\r")?,
+                '\t' => write!(f, "\\t")?,
+                c => write!(f, "{c}")?,
+            }
+        }
+        write!(f, "\"")
+    } else {
+        write!(f, "{s}")
+    }
+}
+
+fn looks_like_number(s: &str) -> bool {
+    let s = s
+        .strip_prefix('+')
+        .or_else(|| s.strip_prefix('-'))
+        .unwrap_or(s);
+    if s.is_empty() {
+        return false;
+    }
+    if s.starts_with("0b") || s.starts_with("0o") || s.starts_with("0x") {
+        return true;
+    }
+    if s.chars().all(|c| c.is_ascii_digit()) {
+        return true;
+    }
+    if (s.contains('.') || s.contains('e') || s.contains('E')) && s.as_bytes()[0].is_ascii_digit() {
+        return true;
+    }
+    false
 }

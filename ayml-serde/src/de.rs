@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use serde::de::{self, DeserializeOwned, Visitor};
 
 use crate::error::{Error, Result};
@@ -63,7 +65,7 @@ enum Context {
 // ── Deserializer ─────────────────────────────────────────────────
 
 /// Maximum nesting depth for collections to prevent stack overflow / OOM.
-const MAX_DEPTH: usize = 128;
+const MAX_DEPTH: usize = 64;
 
 pub(crate) struct Deserializer<R> {
     read: R,
@@ -507,12 +509,17 @@ impl<'de, R: Read<'de>> Deserializer<R> {
             }
         }
 
-        // Process: strip indentation, handle escapes, line continuations
+        // Process: strip indentation, handle escapes, line continuations.
+        // Track positions where `\` at end-of-line creates a continuation
+        // (suppresses the following newline). We avoid using a sentinel
+        // character because `\0` is a valid escape that could collide.
         let mut result = String::new();
+        let mut continuation = false; // true if previous line ended with `\`
         for (i, line) in raw_lines.iter().enumerate() {
-            if i > 0 {
+            if i > 0 && !continuation {
                 result.push('\n');
             }
+            continuation = false;
 
             // Strip leading indentation (closing_indent spaces)
             let stripped = if line.len() >= closing_indent
@@ -530,8 +537,8 @@ impl<'de, R: Read<'de>> Deserializer<R> {
             while let Some(ch) = chars.next() {
                 if ch == '\\' {
                     if chars.peek().is_none() {
-                        // `\` at end of line → line continuation sentinel
-                        result.push('\x00');
+                        // `\` at end of line → line continuation
+                        continuation = true;
                         continue;
                     }
                     match chars.next() {
@@ -576,8 +583,7 @@ impl<'de, R: Read<'de>> Deserializer<R> {
             }
         }
 
-        // Apply line continuations: \<newline> joins lines
-        Ok(result.replace("\x00\n", ""))
+        Ok(result)
     }
 
     /// Take `n` hex digits from a char iterator and decode to a char.
@@ -1309,7 +1315,7 @@ struct MapAccess<'a, R> {
     de: &'a mut Deserializer<R>,
     style: MapStyle,
     first: bool,
-    seen_keys: Vec<String>,
+    seen_keys: HashSet<String>,
 }
 
 impl<'a, R> MapAccess<'a, R> {
@@ -1318,8 +1324,31 @@ impl<'a, R> MapAccess<'a, R> {
             de,
             style,
             first: true,
-            seen_keys: Vec::new(),
+            seen_keys: HashSet::default(),
         }
+    }
+}
+
+impl<'de, R: Read<'de>> MapAccess<'_, R> {
+    /// Validate that an unquoted mapping key does not resolve to null or float.
+    /// Per spec: "A mapping key MUST NOT resolve to null or float."
+    fn validate_key(&self, key_text: &str) -> Result<()> {
+        // Quoted keys (starting with `"`) are always allowed
+        if key_text.starts_with('"') {
+            return Ok(());
+        }
+        let bare = key_text.trim();
+        if bare == "null" {
+            return Err(self
+                .de
+                .error("unquoted `null` is not allowed as a mapping key; use \"null\""));
+        }
+        if try_parse_float(bare).is_some() {
+            return Err(self.de.error(&format!(
+                "unquoted `{bare}` resolves to float and is not allowed as a mapping key; quote it"
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -1352,10 +1381,10 @@ impl<'de, R: Read<'de>> de::MapAccess<'de> for MapAccess<'_, R> {
                 let key = seed.deserialize(&mut *self.de)?;
                 let key_text = self.de.read.input()[key_start..self.de.offset()].to_string();
                 self.de.reading_key = false;
-                if self.seen_keys.contains(&key_text) {
+                self.validate_key(&key_text)?;
+                if !self.seen_keys.insert(key_text.clone()) {
                     return Err(self.de.error(&format!("duplicate key `{key_text}`")));
                 }
-                self.seen_keys.push(key_text);
                 self.de.skip_whitespace_and_comments()?;
                 if !self.de.eat(':')? {
                     return Err(self.de.error("expected `:` after mapping key"));
@@ -1413,10 +1442,10 @@ impl<'de, R: Read<'de>> de::MapAccess<'de> for MapAccess<'_, R> {
                 let key = seed.deserialize(&mut *self.de)?;
                 let key_text = self.de.read.input()[key_start..self.de.offset()].to_string();
                 self.de.reading_key = false;
-                if self.seen_keys.contains(&key_text) {
+                self.validate_key(&key_text)?;
+                if !self.seen_keys.insert(key_text.clone()) {
                     return Err(self.de.error(&format!("duplicate key `{key_text}`")));
                 }
-                self.seen_keys.push(key_text);
                 self.de.skip_inline_whitespace()?;
                 if !self.de.eat(':')? {
                     return Err(self.de.error("expected `:` after mapping key"));

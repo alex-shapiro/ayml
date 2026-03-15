@@ -303,6 +303,11 @@ impl<'a, W: std::io::Write> ser::Serializer for &'a mut Serializer<W> {
     }
 
     fn serialize_unit_struct(self, _name: &'static str) -> Result<()> {
+        if self.serializing_key {
+            return Err(Error::Message(
+                "null values are not allowed as mapping keys".into(),
+            ));
+        }
         self.scalar_prefix()?;
         self.write_str("null")
     }
@@ -694,7 +699,7 @@ impl<W: std::io::Write> ser::SerializeStruct for Compound<'_, W> {
             return self.serialize_commented_field(key, value);
         }
         self.write_key_prefix()?;
-        self.ser.write_str(key)?;
+        write_key(&mut self.ser.writer, key)?;
         self.ser.write_str(":")?;
         self.ser.after_key = true;
         value.serialize(&mut *self.ser)
@@ -905,11 +910,21 @@ fn needs_quoting(s: &str) -> bool {
             0x00..=0x08 | 0x0B | 0x0C | 0x0E..=0x1F | 0x7F | b'\n' | b'\r' | b'"' | b'\\' => {
                 return true;
             }
+            // Flow indicators mid-string would break in flow context
+            b',' | b'[' | b']' | b'{' | b'}' => return true,
             // `: ` mid-string would be parsed as mapping indicator
             b':' if i + 1 < bytes.len() && bytes[i + 1] == b' ' => return true,
-            // ` #` would start a comment
-            b'#' if i > 0 && bytes[i - 1] == b' ' => return true,
+            // `<whitespace>#` would start a comment (space or tab)
+            b'#' if i > 0 && (bytes[i - 1] == b' ' || bytes[i - 1] == b'\t') => return true,
             _ => {}
+        }
+    }
+
+    // Check for non-printable characters outside ASCII (C1 control block,
+    // surrogates, etc.) by iterating chars.
+    for ch in s.chars() {
+        if !is_printable_for_bare(ch) {
+            return true;
         }
     }
 
@@ -929,6 +944,22 @@ fn needs_quoting(s: &str) -> bool {
     }
 
     false
+}
+
+/// Check if a character is safe in a bare string. This is the c-printable set
+/// minus line break characters (LF, CR) which are already handled by the
+/// byte-level checks. NEL (U+0085) is c-printable and nb-char per the spec.
+fn is_printable_for_bare(ch: char) -> bool {
+    let cp = ch as u32;
+    matches!(
+        cp,
+        0x09 |
+        0x20..=0x7E |
+        0x85 |
+        0xA0..=0xD7FF |
+        0xE000..=0xFFFD |
+        0x10000..=0x10_FFFF
+    )
 }
 
 /// Check if a string looks like it would be parsed as a number.
@@ -1002,32 +1033,48 @@ fn write_quoted<W: std::io::Write>(w: &mut W, s: &str) -> std::io::Result<()> {
 /// Write a single line of triple-quoted string content, escaping control
 /// characters but allowing `"` and `#` to pass through literally.
 fn write_triple_quoted_line<W: std::io::Write>(w: &mut W, line: &str) -> std::io::Result<()> {
+    let mut consecutive_quotes = 0u32;
     for ch in line.chars() {
         match ch {
-            '\0' => w.write_all(b"\\0")?,
-            '\x07' => w.write_all(b"\\a")?,
-            '\x08' => w.write_all(b"\\b")?,
-            '\t' => w.write_all(b"\\t")?,
-            // \n shouldn't appear here (lines are split on \n)
-            '\x0B' => w.write_all(b"\\v")?,
-            '\x0C' => w.write_all(b"\\f")?,
-            '\r' => w.write_all(b"\\r")?,
-            '\x1B' => w.write_all(b"\\e")?,
-            '\\' => w.write_all(b"\\\\")?,
-            c if c.is_control() => {
-                let cp = c as u32;
-                if cp <= 0xFF {
-                    write!(w, "\\x{cp:02x}")?;
-                } else if cp <= 0xFFFF {
-                    write!(w, "\\u{cp:04x}")?;
+            '"' => {
+                consecutive_quotes += 1;
+                if consecutive_quotes == 3 {
+                    // Break the `"""` sequence by escaping this quote
+                    w.write_all(b"\\\"")?;
+                    consecutive_quotes = 0;
                 } else {
-                    write!(w, "\\U{cp:08x}")?;
+                    w.write_all(b"\"")?;
                 }
             }
-            c => {
-                let mut buf = [0u8; 4];
-                let s = c.encode_utf8(&mut buf);
-                w.write_all(s.as_bytes())?;
+            other => {
+                consecutive_quotes = 0;
+                match other {
+                    '\0' => w.write_all(b"\\0")?,
+                    '\x07' => w.write_all(b"\\a")?,
+                    '\x08' => w.write_all(b"\\b")?,
+                    '\t' => w.write_all(b"\\t")?,
+                    // \n shouldn't appear here (lines are split on \n)
+                    '\x0B' => w.write_all(b"\\v")?,
+                    '\x0C' => w.write_all(b"\\f")?,
+                    '\r' => w.write_all(b"\\r")?,
+                    '\x1B' => w.write_all(b"\\e")?,
+                    '\\' => w.write_all(b"\\\\")?,
+                    c if c.is_control() => {
+                        let cp = c as u32;
+                        if cp <= 0xFF {
+                            write!(w, "\\x{cp:02x}")?;
+                        } else if cp <= 0xFFFF {
+                            write!(w, "\\u{cp:04x}")?;
+                        } else {
+                            write!(w, "\\U{cp:08x}")?;
+                        }
+                    }
+                    c => {
+                        let mut buf = [0u8; 4];
+                        let s = c.encode_utf8(&mut buf);
+                        w.write_all(s.as_bytes())?;
+                    }
+                }
             }
         }
     }
