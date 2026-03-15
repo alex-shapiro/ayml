@@ -96,7 +96,9 @@ impl<'de> Visitor<'de> for CommentedValueKindVisitor {
     }
 
     fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> {
-        Ok(CommentedValueKind::Int(v.cast_signed()))
+        let i = i64::try_from(v)
+            .map_err(|_| de::Error::custom(format_args!("u64 value {v} exceeds i64::MAX")))?;
+        Ok(CommentedValueKind::Int(i))
     }
 
     fn visit_f64<E: de::Error>(self, v: f64) -> Result<Self::Value, E> {

@@ -40,6 +40,7 @@ pub fn to_writer<W: std::io::Write, T: Serialize>(writer: W, value: &T) -> Resul
 
 // ── Serializer ──────────────────────────────────────────────────
 
+#[allow(clippy::struct_excessive_bools)]
 struct Serializer<W> {
     writer: W,
     indent: usize,
@@ -53,6 +54,9 @@ struct Serializer<W> {
     /// element. This allows `Commented<T>` to emit a top comment before
     /// the dash indicator.
     pending_seq_dash: bool,
+    /// When true, we are serializing a mapping key. Null and float keys
+    /// are rejected per the AYML spec.
+    serializing_key: bool,
 }
 
 impl<W: std::io::Write> Serializer<W> {
@@ -63,6 +67,7 @@ impl<W: std::io::Write> Serializer<W> {
             after_key: false,
             compact: false,
             pending_seq_dash: false,
+            serializing_key: false,
         }
     }
 
@@ -218,6 +223,11 @@ impl<'a, W: std::io::Write> ser::Serializer for &'a mut Serializer<W> {
     }
 
     fn serialize_f64(self, v: f64) -> Result<()> {
+        if self.serializing_key {
+            return Err(Error::Message(
+                "float values are not allowed as mapping keys".into(),
+            ));
+        }
         self.scalar_prefix()?;
         if v.is_nan() {
             self.write_str("nan")
@@ -269,6 +279,11 @@ impl<'a, W: std::io::Write> ser::Serializer for &'a mut Serializer<W> {
     }
 
     fn serialize_none(self) -> Result<()> {
+        if self.serializing_key {
+            return Err(Error::Message(
+                "null values are not allowed as mapping keys".into(),
+            ));
+        }
         self.scalar_prefix()?;
         self.write_str("null")
     }
@@ -278,6 +293,11 @@ impl<'a, W: std::io::Write> ser::Serializer for &'a mut Serializer<W> {
     }
 
     fn serialize_unit(self) -> Result<()> {
+        if self.serializing_key {
+            return Err(Error::Message(
+                "null values are not allowed as mapping keys".into(),
+            ));
+        }
         self.scalar_prefix()?;
         self.write_str("null")
     }
@@ -643,7 +663,10 @@ impl<W: std::io::Write> ser::SerializeMap for Compound<'_, W> {
 
     fn serialize_key<T: ?Sized + Serialize>(&mut self, key: &T) -> Result<()> {
         self.write_key_prefix()?;
-        key.serialize(&mut *self.ser)?;
+        self.ser.serializing_key = true;
+        let result = key.serialize(&mut *self.ser);
+        self.ser.serializing_key = false;
+        result?;
         self.ser.write_str(":")?;
         self.ser.after_key = true;
         Ok(())
@@ -1488,5 +1511,32 @@ ports:
             val: Value::Num(42),
         };
         assert_eq!(to_string(&c).unwrap(), "val:\n  Num: 42\n");
+    }
+
+    #[test]
+    fn test_float_key_rejected() {
+        // Manually serialize a map with a float key via SerializeMap
+        use serde::ser::SerializeMap;
+        let mut buf = Vec::new();
+        let mut ser = Serializer::new(&mut buf);
+        let mut map = ser::Serializer::serialize_map(&mut ser, Some(1)).unwrap();
+        let err = map.serialize_entry(&1.5f64, &"x").unwrap_err();
+        assert!(
+            err.to_string().contains("float"),
+            "expected float key error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_null_key_rejected() {
+        use serde::ser::SerializeMap;
+        let mut buf = Vec::new();
+        let mut ser = Serializer::new(&mut buf);
+        let mut map = ser::Serializer::serialize_map(&mut ser, Some(1)).unwrap();
+        let err = map.serialize_entry(&(), &"value").unwrap_err();
+        assert!(
+            err.to_string().contains("null"),
+            "expected null key error, got: {err}"
+        );
     }
 }

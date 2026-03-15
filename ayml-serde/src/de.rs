@@ -1309,6 +1309,7 @@ struct MapAccess<'a, R> {
     de: &'a mut Deserializer<R>,
     style: MapStyle,
     first: bool,
+    seen_keys: Vec<String>,
 }
 
 impl<'a, R> MapAccess<'a, R> {
@@ -1317,6 +1318,7 @@ impl<'a, R> MapAccess<'a, R> {
             de,
             style,
             first: true,
+            seen_keys: Vec::new(),
         }
     }
 }
@@ -1346,8 +1348,14 @@ impl<'de, R: Read<'de>> de::MapAccess<'de> for MapAccess<'_, R> {
                 }
                 self.first = false;
                 self.de.reading_key = true;
+                let key_start = self.de.offset();
                 let key = seed.deserialize(&mut *self.de)?;
+                let key_text = self.de.read.input()[key_start..self.de.offset()].to_string();
                 self.de.reading_key = false;
+                if self.seen_keys.contains(&key_text) {
+                    return Err(self.de.error(&format!("duplicate key `{key_text}`")));
+                }
+                self.seen_keys.push(key_text);
                 self.de.skip_whitespace_and_comments()?;
                 if !self.de.eat(':')? {
                     return Err(self.de.error("expected `:` after mapping key"));
@@ -1401,8 +1409,14 @@ impl<'de, R: Read<'de>> de::MapAccess<'de> for MapAccess<'_, R> {
                 }
 
                 self.de.reading_key = true;
+                let key_start = self.de.offset();
                 let key = seed.deserialize(&mut *self.de)?;
+                let key_text = self.de.read.input()[key_start..self.de.offset()].to_string();
                 self.de.reading_key = false;
+                if self.seen_keys.contains(&key_text) {
+                    return Err(self.de.error(&format!("duplicate key `{key_text}`")));
+                }
+                self.seen_keys.push(key_text);
                 self.de.skip_inline_whitespace()?;
                 if !self.de.eat(':')? {
                     return Err(self.de.error("expected `:` after mapping key"));
@@ -2298,5 +2312,19 @@ mod tests {
         // 3 levels of nesting should be fine
         let val: crate::Value = from_str("[[1, 2], [3, 4]]").unwrap();
         assert!(matches!(val, crate::Value::Seq(_)));
+    }
+
+    #[test]
+    fn test_duplicate_key_block() {
+        use std::collections::HashMap;
+        let err = from_str::<HashMap<String, i32>>("a: 1\na: 2").unwrap_err();
+        assert!(err.to_string().contains("duplicate key"), "{err}");
+    }
+
+    #[test]
+    fn test_duplicate_key_flow() {
+        use std::collections::HashMap;
+        let err = from_str::<HashMap<String, i32>>("{a: 1, a: 2}").unwrap_err();
+        assert!(err.to_string().contains("duplicate key"), "{err}");
     }
 }

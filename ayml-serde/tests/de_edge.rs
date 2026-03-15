@@ -489,9 +489,9 @@ fn de_triple_quoted_with_hash() {
 fn de_depth_limit_nested_enums() {
     // Deeply nested enum mappings should hit the depth limit
     #[derive(Deserialize, Debug)]
+    #[allow(dead_code)]
     enum E {
         A(Box<E>),
-        #[allow(dead_code)]
         B,
     }
     // 200 levels of nesting via block enum mappings
@@ -499,7 +499,7 @@ fn de_depth_limit_nested_enums() {
     for _ in 0..200 {
         input.push_str("A: ");
     }
-    input.push_str("B");
+    input.push('B');
     let err = from_str::<E>(&input);
     assert!(err.is_err(), "should have hit depth limit");
     assert!(
