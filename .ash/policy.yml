@@ -50,6 +50,9 @@ files:
     action: deny
     operations:
     - read
+  - path: ~/Library/Python/3.9/lib/python/site-packages
+    operations:
+    - read
   - path: ~/Projects
     operations:
     - read
@@ -62,8 +65,9 @@ network:
   - host: yaml.org
 exec:
   rules:
-  - path: /opt/homebrew/Cellar/tree/*/bin/tree
-  - path: ./fuzz/target/**
+  - path: ./ayml-serde/fuzz/target/**
   - path: ./target/**
+  - path: /opt/homebrew/Cellar/tree/*/bin/tree
+  - path: ~/.cargo/bin/cargo-fuzz
 io_devices:
   rules: []
