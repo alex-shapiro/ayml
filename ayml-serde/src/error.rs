@@ -15,7 +15,7 @@ pub enum Error {
     /// Unexpected Error
     #[error("unexpected")]
     Unexpected,
-    /// A custom message from serde or this crate.
+    /// Custom message from serde or this crate.
     #[error("{0}")]
     Message(String),
 }
