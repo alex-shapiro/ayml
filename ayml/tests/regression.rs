@@ -439,3 +439,15 @@ fn colon_tab_mid_string_quoted() {
     let rt: ayml::Value = from_str(&s).unwrap();
     assert_eq!(v, rt);
 }
+
+#[test]
+fn overflowing_digit_string_roundtrips() {
+    // Fuzz crash: "888...888" (30 digits) exceeds i64 range. The serializer
+    // must quote it so it roundtrips as a string, not fail as integer overflow.
+    let digits = "8".repeat(30);
+    let v = ayml::Value::Str(digits.clone());
+    let s = to_string(&v).unwrap();
+    assert!(s.starts_with('"'), "overflowing digits should be quoted: {s}");
+    let rt: ayml::Value = from_str(&s).unwrap();
+    assert_eq!(v, rt);
+}
