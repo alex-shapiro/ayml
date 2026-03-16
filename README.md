@@ -68,3 +68,8 @@ Fuzz test crashes are saved to `fuzz/artifacts/<target>/`. Reproduce with:
 ```bash
 cargo +nightly fuzz run fuzz_deserialize fuzz/artifacts/fuzz_deserialize/crash-<hash>
 ```
+
+## Acknowledgements
+
+* The [AYML specification](spec.md) is derived primarily from the YAML 1.2 specification.
+* The AYML serde implementation is heavily influenced by [serde_json](https://github.com/serde-rs/json)
