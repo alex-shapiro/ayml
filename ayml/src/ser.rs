@@ -255,10 +255,10 @@ impl<'a, W: std::io::Write> ser::Serializer for &'a mut Serializer<W> {
         if v.is_empty() {
             return self.write_str(r#""""#);
         }
-        if v.contains('\n') {
+        if v.contains('\n') && !self.serializing_key {
             return self.write_triple_quoted(v);
         }
-        if needs_quoting(v) {
+        if v.contains('\n') || needs_quoting(v) {
             write_quoted(&mut self.writer, v).map_err(Error::from)
         } else {
             self.write_str(v)

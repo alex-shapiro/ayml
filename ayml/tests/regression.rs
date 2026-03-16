@@ -441,6 +441,23 @@ fn colon_tab_mid_string_quoted() {
 }
 
 #[test]
+fn mapping_key_with_newline_roundtrips() {
+    // Fuzz crash: a mapping key containing \n was triple-quoted by the serializer,
+    // but triple-quoted strings span multiple lines and can't be mapping keys.
+    // The serializer must use single-line double-quoting for keys with \n.
+    use indexmap::IndexMap;
+    let mut inner = IndexMap::new();
+    inner.insert("v".to_string(), ayml::Value::Int(1));
+    let mut outer = IndexMap::new();
+    outer.insert("a\nb".to_string(), ayml::Value::Map(inner));
+    let v = ayml::Value::Map(outer);
+    let s = to_string(&v).unwrap();
+    assert!(s.starts_with("\"a\\nb\":"), "key should be double-quoted: {s}");
+    let rt: ayml::Value = from_str(&s).unwrap();
+    assert_eq!(v, rt);
+}
+
+#[test]
 fn overflowing_digit_string_roundtrips() {
     // Fuzz crash: "888...888" (30 digits) exceeds i64 range. The serializer
     // must quote it so it roundtrips as a string, not fail as integer overflow.
