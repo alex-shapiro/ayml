@@ -429,3 +429,13 @@ fn bare_colon_string_roundtrips() {
     let rt: ayml::Value = from_str(&s).unwrap();
     assert_eq!(rt, ayml::Value::Str(":".into()));
 }
+
+#[test]
+fn colon_tab_mid_string_quoted() {
+    // `:\t` mid-string would be parsed as a mapping value indicator.
+    let v = ayml::Value::Str("foo:\tbar".into());
+    let s = to_string(&v).unwrap();
+    assert!(s.starts_with('"'), "should be quoted: {s}");
+    let rt: ayml::Value = from_str(&s).unwrap();
+    assert_eq!(v, rt);
+}

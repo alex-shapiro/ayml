@@ -907,8 +907,10 @@ fn needs_quoting(s: &str) -> bool {
             }
             // Flow indicators and '#' anywhere would break parsing
             b',' | b'[' | b']' | b'{' | b'}' | b'#' => return true,
-            // `: ` mid-string would be parsed as mapping indicator
-            b':' if i + 1 < bytes.len() && bytes[i + 1] == b' ' => return true,
+            // `: ` or `:\t` mid-string would be parsed as mapping indicator
+            b':' if i + 1 < bytes.len() && (bytes[i + 1] == b' ' || bytes[i + 1] == b'\t') => {
+                return true;
+            }
             _ => {}
         }
     }
