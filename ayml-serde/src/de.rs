@@ -136,11 +136,6 @@ impl<R: Read> Deserializer<R> {
         self.read.peek_at(n)
     }
 
-    /// Consume the next byte (must have been peeked), recording if active.
-    fn advance(&mut self) -> Result<Option<u8>> {
-        self.next_byte()
-    }
-
     fn is_eof(&mut self) -> Result<bool> {
         Ok(self.peek()?.is_none())
     }
@@ -154,7 +149,7 @@ impl<R: Read> Deserializer<R> {
 
     fn skip_inline_whitespace(&mut self) -> Result<()> {
         while let Some(b' ' | b'\t') = self.peek()? {
-            self.advance()?;
+            self.next_byte()?;
         }
         Ok(())
     }
@@ -165,7 +160,7 @@ impl<R: Read> Deserializer<R> {
             match self.peek()? {
                 Some(b'\n' | b'\r') | None => break,
                 Some(b) => {
-                    self.advance()?;
+                    self.next_byte()?;
                     buf.push(b);
                 }
             }
@@ -177,16 +172,16 @@ impl<R: Read> Deserializer<R> {
     fn eat_break(&mut self) -> Result<bool> {
         match self.peek()? {
             Some(b'\r') => {
-                self.advance()?;
+                self.next_byte()?;
                 self.line += 1;
                 if self.peek()? == Some(b'\n') {
-                    self.advance()?;
+                    self.next_byte()?;
                 }
                 self.line_start = self.read.byte_offset();
                 Ok(true)
             }
             Some(b'\n') => {
-                self.advance()?;
+                self.next_byte()?;
                 self.line += 1;
                 self.line_start = self.read.byte_offset();
                 Ok(true)
@@ -249,7 +244,7 @@ impl<R: Read> Deserializer<R> {
         loop {
             match self.peek()? {
                 Some(b' ' | b'\t') => {
-                    self.advance()?;
+                    self.next_byte()?;
                 }
                 Some(b'\n' | b'\r') => {
                     self.eat_break()?;
@@ -270,10 +265,10 @@ impl<R: Read> Deserializer<R> {
     /// Consume a `# ...` comment line including the trailing break,
     /// appending the comment text to `pending_top_comment`.
     fn capture_comment_line(&mut self) -> Result<()> {
-        self.advance()?; // skip '#'
+        self.next_byte()?; // skip '#'
         // Skip optional space after '#'
         if self.peek()? == Some(b' ') {
-            self.advance()?;
+            self.next_byte()?;
         }
         let mut buf = Vec::new();
         self.rest_of_line_into(&mut buf)?;
@@ -296,7 +291,7 @@ impl<R: Read> Deserializer<R> {
 
     fn eat(&mut self, expected: u8) -> Result<bool> {
         if self.peek()? == Some(expected) {
-            self.advance()?;
+            self.next_byte()?;
             Ok(true)
         } else {
             Ok(false)
@@ -312,7 +307,7 @@ impl<R: Read> Deserializer<R> {
                 Some(b'\t') => {
                     // Consume the spaces we counted, then error at the tab position
                     for _ in 0..count {
-                        self.advance()?;
+                        self.next_byte()?;
                     }
                     return Err(self.error("tabs not allowed for indentation"));
                 }
@@ -334,7 +329,7 @@ impl<R: Read> Deserializer<R> {
             }
         }
         for _ in 0..n {
-            self.advance()?;
+            self.next_byte()?;
         }
         Ok(true)
     }
@@ -349,7 +344,7 @@ impl<R: Read> Deserializer<R> {
                     Some(b'\n' | b'\r') => {
                         // Blank line — consume everything including the break
                         for _ in 0..i {
-                            self.advance()?;
+                            self.next_byte()?;
                         }
                         self.eat_break()?;
                         break;
@@ -369,7 +364,7 @@ impl<R: Read> Deserializer<R> {
             if let Some(b'#') = self.peek_at(spaces)? {
                 // Consume the spaces and the comment
                 for _ in 0..spaces {
-                    self.advance()?;
+                    self.next_byte()?;
                 }
                 self.capture_comment_line()?;
                 continue;
@@ -420,7 +415,7 @@ impl<R: Read> Deserializer<R> {
         }
         // Consume everything we peeked past (inline ws + comment text)
         for _ in 0..i {
-            self.advance()?;
+            self.next_byte()?;
         }
         // Consume the break
         self.eat_break()?;
@@ -454,19 +449,19 @@ impl<R: Read> Deserializer<R> {
 
     fn scan_double_quoted(&mut self) -> Result<String> {
         let start_offset = self.byte_offset();
-        self.advance()?; // opening `"`
+        self.next_byte()?; // opening `"`
         self.scratch.clear();
 
         loop {
             match self.peek()? {
                 Some(b'"') => {
-                    self.advance()?;
+                    self.next_byte()?;
                     let s = String::from_utf8(std::mem::take(&mut self.scratch))
                         .map_err(|e| Error::Message(format!("invalid UTF-8: {e}")))?;
                     return Ok(s);
                 }
                 Some(b'\\') => {
-                    self.advance()?;
+                    self.next_byte()?;
                     let ch = self.parse_escape()?;
                     let mut buf = [0u8; 4];
                     let encoded = ch.encode_utf8(&mut buf);
@@ -484,7 +479,7 @@ impl<R: Read> Deserializer<R> {
                             self.error(&format!("non-printable character U+{:04X}", u32::from(b)))
                         );
                     }
-                    self.advance()?;
+                    self.next_byte()?;
                     self.scratch.push(b);
                     // If this is a multi-byte UTF-8 leading byte, read continuation bytes
                     if b >= 0x80 {
@@ -511,7 +506,7 @@ impl<R: Read> Deserializer<R> {
             return Err(self.error("invalid UTF-8 byte"));
         };
         for _ in 0..n {
-            match self.advance()? {
+            match self.next_byte()? {
                 Some(b) if b & 0xC0 == 0x80 => {
                     self.scratch.push(b);
                 }
@@ -533,9 +528,9 @@ impl<R: Read> Deserializer<R> {
     fn scan_triple_quoted(&mut self) -> Result<String> {
         let start_offset = self.byte_offset();
         // Consume opening `"""`
-        self.advance()?;
-        self.advance()?;
-        self.advance()?;
+        self.next_byte()?;
+        self.next_byte()?;
+        self.next_byte()?;
 
         // Must be followed by a line break
         if !self.eat_break()? {
@@ -573,7 +568,7 @@ impl<R: Read> Deserializer<R> {
                     closing_indent = spaces;
                     // Consume spaces + `"""`
                     for _ in 0..spaces + 3 {
-                        self.advance()?;
+                        self.next_byte()?;
                     }
                     break;
                 }
@@ -632,7 +627,7 @@ impl<R: Read> Deserializer<R> {
     /// Parse a double-quoted escape sequence (after consuming the `\`).
     fn parse_escape(&mut self) -> Result<char> {
         let esc_start = self.byte_offset().saturating_sub(1);
-        match self.advance()? {
+        match self.next_byte()? {
             Some(b'0') => Ok('\0'),
             Some(b'a') => Ok('\x07'),
             Some(b'b') => Ok('\x08'),
@@ -661,7 +656,7 @@ impl<R: Read> Deserializer<R> {
         let start = self.byte_offset();
         let mut value: u32 = 0;
         for _ in 0..digits {
-            match self.advance()? {
+            match self.next_byte()? {
                 Some(b) if (b as char).is_ascii_hexdigit() => {
                     value = value * 16 + (b as char).to_digit(16).unwrap();
                 }
@@ -685,7 +680,7 @@ impl<R: Read> Deserializer<R> {
                 let next = self.peek_at(1)?;
                 match next {
                     Some(b) if !is_ascii_whitespace(b) && is_printable_byte_start(b) => {
-                        let b0 = self.advance()?.unwrap();
+                        let b0 = self.next_byte()?.unwrap();
                         self.scratch.push(b0);
                     }
                     _ => {
@@ -694,7 +689,7 @@ impl<R: Read> Deserializer<R> {
                 }
             }
             Some(b) if is_plain_first_byte(b) => {
-                self.advance()?;
+                self.next_byte()?;
                 self.scratch.push(b);
                 if b >= 0x80 {
                     self.read_utf8_continuation(b)?;
@@ -716,7 +711,7 @@ impl<R: Read> Deserializer<R> {
 
             // Accumulate inline whitespace into scratch
             while let Some(b' ' | b'\t') = self.peek()? {
-                let b = self.advance()?.unwrap();
+                let b = self.next_byte()?.unwrap();
                 self.scratch.push(b);
             }
 
@@ -749,7 +744,7 @@ impl<R: Read> Deserializer<R> {
                             .map_err(|e| Error::Message(format!("invalid UTF-8: {e}")))?;
                         return Ok(s);
                     }
-                    self.advance()?;
+                    self.next_byte()?;
                     self.scratch.push(b':');
                 }
                 Some(b',' | b']' | b'}') if ctx == Context::Flow => {
@@ -764,7 +759,7 @@ impl<R: Read> Deserializer<R> {
                     );
                 }
                 Some(b) => {
-                    self.advance()?;
+                    self.next_byte()?;
                     self.scratch.push(b);
                     if b >= 0x80 {
                         self.read_utf8_continuation(b)?;
@@ -834,9 +829,9 @@ impl<R: Read> Deserializer<R> {
     fn capture_inline_comment(&mut self) -> Result<Option<String>> {
         self.skip_inline_whitespace()?;
         if self.peek()? == Some(b'#') {
-            self.advance()?; // skip '#'
+            self.next_byte()?; // skip '#'
             if self.peek()? == Some(b' ') {
-                self.advance()?; // skip space
+                self.next_byte()?; // skip space
             }
             let mut buf = Vec::new();
             self.rest_of_line_into(&mut buf)?;
@@ -895,7 +890,7 @@ impl<'de, R: Read> de::Deserializer<'de> for &mut Deserializer<R> {
                 if !self.reading_key && self.ctx == Context::Block {
                     self.skip_inline_whitespace()?;
                     if self.is_mapping_value_indicator()? {
-                        self.advance()?; // consume ':'
+                        self.next_byte()?; // consume ':'
                         self.skip_inline_whitespace()?;
                         self.enter_collection()?;
                         let key = PrescannedKey { value: s, raw };
@@ -911,7 +906,7 @@ impl<'de, R: Read> de::Deserializer<'de> for &mut Deserializer<R> {
                 visitor.visit_string(s)
             }
             Some(b'[') => {
-                self.advance()?;
+                self.next_byte()?;
                 let prev_ctx = self.ctx;
                 self.enter_collection()?;
                 let result = visitor.visit_seq(SeqAccess::new(self, SeqStyle::Flow));
@@ -925,7 +920,7 @@ impl<'de, R: Read> de::Deserializer<'de> for &mut Deserializer<R> {
                 Ok(value)
             }
             Some(b'{') => {
-                self.advance()?;
+                self.next_byte()?;
                 let prev_ctx = self.ctx;
                 self.enter_collection()?;
                 let result = visitor.visit_map(MapAccess::new(self, MapStyle::Flow));
@@ -954,7 +949,7 @@ impl<'de, R: Read> de::Deserializer<'de> for &mut Deserializer<R> {
                 if !self.reading_key && self.ctx == Context::Block {
                     self.skip_inline_whitespace()?;
                     if self.is_mapping_value_indicator()? {
-                        self.advance()?; // consume ':'
+                        self.next_byte()?; // consume ':'
                         self.skip_inline_whitespace()?;
                         self.enter_collection()?;
                         let key = PrescannedKey { value: text, raw };
@@ -1085,10 +1080,10 @@ impl<'de, R: Read> de::Deserializer<'de> for &mut Deserializer<R> {
         self.skip_whitespace_and_comments()?;
         if self.is_null_ahead()? {
             // Consume "null"
-            self.advance()?;
-            self.advance()?;
-            self.advance()?;
-            self.advance()?;
+            self.next_byte()?;
+            self.next_byte()?;
+            self.next_byte()?;
+            self.next_byte()?;
             return visitor.visit_none();
         }
         visitor.visit_some(self)
@@ -1125,7 +1120,7 @@ impl<'de, R: Read> de::Deserializer<'de> for &mut Deserializer<R> {
         self.enter_collection()?;
         match self.peek()? {
             Some(b'[') => {
-                self.advance()?;
+                self.next_byte()?;
                 let prev_ctx = self.ctx;
                 let result = visitor.visit_seq(SeqAccess::new(self, SeqStyle::Flow));
                 self.leave_collection();
@@ -1167,7 +1162,7 @@ impl<'de, R: Read> de::Deserializer<'de> for &mut Deserializer<R> {
         self.skip_whitespace_and_comments()?;
         self.enter_collection()?;
         if let Some(b'{') = self.peek()? {
-            self.advance()?;
+            self.next_byte()?;
             let prev_ctx = self.ctx;
             let result = visitor.visit_map(MapAccess::new(self, MapStyle::Flow));
             self.leave_collection();
@@ -1206,7 +1201,7 @@ impl<'de, R: Read> de::Deserializer<'de> for &mut Deserializer<R> {
     ) -> Result<V::Value> {
         self.skip_whitespace_and_comments()?;
         if let Some(b'{') = self.peek()? {
-            self.advance()?;
+            self.next_byte()?;
             let prev_ctx = self.ctx;
             self.ctx = Context::Flow;
             self.enter_collection()?;
@@ -1228,7 +1223,7 @@ impl<'de, R: Read> de::Deserializer<'de> for &mut Deserializer<R> {
             let text = self.scan_scalar_string(self.ctx)?;
             self.skip_inline_whitespace()?;
             if self.is_mapping_value_indicator()? {
-                self.advance()?; // consume ':'
+                self.next_byte()?; // consume ':'
                 self.skip_inline_whitespace()?;
                 self.enter_collection()?;
                 let value = visitor.visit_enum(EnumAccess {
@@ -1313,7 +1308,7 @@ impl<'de, R: Read> de::SeqAccess<'de> for SeqAccess<'_, R> {
                     if !self.de.eat(b'-')? || self.de.peek()? != Some(b' ') {
                         return Err(self.de.error("expected `- `"));
                     }
-                    self.de.advance()?; // eat space
+                    self.de.next_byte()?; // eat space
                     return seed.deserialize(&mut *self.de).map(Some);
                 }
 
@@ -1339,7 +1334,7 @@ impl<'de, R: Read> de::SeqAccess<'de> for SeqAccess<'_, R> {
                 }
                 // Now consume indent + `- `
                 for _ in 0..indent + 2 {
-                    self.de.advance()?;
+                    self.de.next_byte()?;
                 }
                 seed.deserialize(&mut *self.de).map(Some)
             }
