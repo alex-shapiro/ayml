@@ -436,6 +436,8 @@ impl<W: std::io::Write> ser::SerializeSeq for SeqState<'_, W> {
             if self.ser.after_key {
                 self.ser.write_str("\n")?;
                 self.ser.after_key = false;
+                self.ser.indent += 2;
+                self.bumped = true;
             }
             if self.ser.compact {
                 self.ser.compact = false;
@@ -1248,7 +1250,7 @@ mod tests {
         let c = Config {
             items: vec!["alpha".into(), "beta".into()],
         };
-        assert_eq!(to_string(&c).unwrap(), "items:\n- alpha\n- beta\n");
+        assert_eq!(to_string(&c).unwrap(), "items:\n  - alpha\n  - beta\n");
     }
 
     #[test]
@@ -1357,8 +1359,8 @@ debug: true
 inner:
   host: localhost
 ports:
-- 8080
-- 9090
+  - 8080
+  - 9090
 ";
         assert_eq!(to_string(&c).unwrap(), expected);
     }
@@ -1437,7 +1439,7 @@ ports:
         }
         assert_eq!(
             to_string(&Cmd::Move(10, 20)).unwrap(),
-            "Move:\n- 10\n- 20\n"
+            "Move:\n  - 10\n  - 20\n"
         );
     }
 
