@@ -22,6 +22,10 @@ files:
   - path: /opt/X11/bin
     operations:
     - read
+  - path: ~/.zprofile
+    action: deny
+    operations:
+    - read
   - path: ~/Library/Application Support/Arc/User Data
     action: deny
     operations:

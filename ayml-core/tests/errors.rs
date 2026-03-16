@@ -95,7 +95,7 @@ fn deeply_nested_flow_mappings_rejected() {
     for _ in 0..200 {
         input.push_str("{a: ");
     }
-    input.push_str("1");
+    input.push('1');
     for _ in 0..200 {
         input.push('}');
     }

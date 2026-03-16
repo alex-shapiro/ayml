@@ -442,8 +442,8 @@ fn resolution_order() {
     let map = node.value.as_mapping().unwrap();
     assert_eq!(map[&MapKey::String("v".into())].value, Value::Int(42));
 
-    // 3.14 is float, not string
-    let node = parse("v: 3.14").unwrap();
+    // 3.25 is float, not string
+    let node = parse("v: 3.25").unwrap();
     let map = node.value.as_mapping().unwrap();
-    assert_eq!(map[&MapKey::String("v".into())].value, Value::Float(3.14));
+    assert_eq!(map[&MapKey::String("v".into())].value, Value::Float(3.25));
 }

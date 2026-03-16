@@ -38,7 +38,7 @@ fn arb_unicode_char() -> impl Strategy<Value = char> {
         // Emoticons
         (0x1F600_u32..=0x1F64F_u32),
     ]
-    .prop_filter_map("valid char", |cp| char::from_u32(cp))
+    .prop_filter_map("valid char", char::from_u32)
 }
 
 /// Generate a random Unicode string of 1..=max_len printable characters.

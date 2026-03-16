@@ -11,8 +11,7 @@ use crate::error::{Error, Result};
 pub fn to_string<T: Serialize>(value: &T) -> Result<String> {
     let mut buf = Vec::new();
     to_writer(&mut buf, value)?;
-    // Safety: Serializer only writes valid UTF-8.
-    Ok(unsafe { String::from_utf8_unchecked(buf) })
+    String::from_utf8(buf).map_err(|_| Error::Message("serializer produced invalid UTF-8".into()))
 }
 
 /// Serialize a `T` to an AYML byte vector.

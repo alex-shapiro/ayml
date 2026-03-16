@@ -4,6 +4,7 @@ mod commented;
 mod commented_value;
 pub mod de;
 mod error;
+mod fmt_helpers;
 mod read;
 pub mod ser;
 mod value;

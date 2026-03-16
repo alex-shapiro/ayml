@@ -881,7 +881,6 @@ impl<'de, R: Read> de::Deserializer<'de> for &mut Deserializer<R> {
         match self.peek()? {
             Some(b'"') => {
                 let start_indent = self.current_indent();
-                let start_offset = self.byte_offset();
                 self.start_recording();
                 let s = self.scan_quoted_string()?;
                 let raw = self.stop_recording();
@@ -901,7 +900,6 @@ impl<'de, R: Read> de::Deserializer<'de> for &mut Deserializer<R> {
                         return value;
                     }
                 }
-                let _ = start_offset;
                 visitor.visit_string(s)
             }
             Some(b'[') => {
@@ -1876,12 +1874,8 @@ fn try_parse_float(s: &str) -> Option<f64> {
         }
     }
 
-    let full = if negative {
-        format!("-{s}")
-    } else {
-        s.to_string()
-    };
-    full.parse::<f64>().ok()
+    let val = s.parse::<f64>().ok()?;
+    Some(if negative { -val } else { val })
 }
 
 fn valid_exponent(exp: &str) -> bool {
@@ -1904,8 +1898,8 @@ mod tests {
 
     #[test]
     fn test_bool() {
-        assert_eq!(from_str::<bool>("true").unwrap(), true);
-        assert_eq!(from_str::<bool>("false").unwrap(), false);
+        assert!(from_str::<bool>("true").unwrap());
+        assert!(!from_str::<bool>("false").unwrap());
     }
 
     #[test]
@@ -1926,6 +1920,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::float_cmp)]
     fn test_floats() {
         assert_eq!(from_str::<f64>("3.25").unwrap(), 3.25);
         assert_eq!(from_str::<f64>("-0.5").unwrap(), -0.5);

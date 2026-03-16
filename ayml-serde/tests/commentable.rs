@@ -88,7 +88,7 @@ fn de_commented_bool_value() {
     }
     let input = "debug: true # enable debug\n";
     let c: Config = ayml_serde::from_str(input).unwrap();
-    assert_eq!(c.debug.value, true);
+    assert!(c.debug.value);
     assert_eq!(c.debug.inline_comment.as_deref(), Some("enable debug"));
 }
 
@@ -123,7 +123,7 @@ fn de_commented_mixed_with_plain() {
     assert_eq!(c.port.value, 8080);
     assert_eq!(c.port.top_comment.as_deref(), Some("the port"));
     assert_eq!(c.port.inline_comment.as_deref(), Some("default"));
-    assert_eq!(c.debug, false);
+    assert!(!c.debug);
 }
 
 // ── Serialization tests ─────────────────────────────────────────────

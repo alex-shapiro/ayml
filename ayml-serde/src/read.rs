@@ -90,9 +90,10 @@ impl<R: std::io::Read> IoRead<R> {
                 self.done = true;
                 break;
             }
-            let len = available.len();
-            self.buf.extend(available.iter());
-            self.reader.consume(len);
+            let need = n - self.buf.len();
+            let take = need.min(available.len());
+            self.buf.extend(&available[..take]);
+            self.reader.consume(take);
         }
         Ok(())
     }
