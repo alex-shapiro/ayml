@@ -1,6 +1,6 @@
 //! Property-based tests for CommentedValue roundtrip and robustness.
 
-use ayml_serde::{CommentedValue, CommentedValueKind, from_str, to_string};
+use ayml::{CommentedValue, CommentedValueKind, from_str, to_string};
 use indexmap::IndexMap;
 use proptest::prelude::*;
 

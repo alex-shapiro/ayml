@@ -69,7 +69,7 @@ network:
   - host: yaml.org
 exec:
   rules:
-  - path: ./ayml-serde/fuzz/target/**
+  - path: ./ayml/fuzz/target/**
   - path: ./target/**
   - path: /opt/homebrew/Cellar/tree/*/bin/tree
   - path: ~/.cargo/bin/cargo-fuzz

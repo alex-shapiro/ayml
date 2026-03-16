@@ -1,7 +1,7 @@
 //! Roundtrip tests: serialize a value to AYML, then deserialize it back
 //! and verify equality. Covers all serde data model types.
 
-use ayml_serde::{from_str, to_string};
+use ayml::{from_str, to_string};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::Debug;

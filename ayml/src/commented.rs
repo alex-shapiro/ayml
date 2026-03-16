@@ -27,7 +27,7 @@ pub(crate) const FIELD_VALUE: &str = "__value__";
 /// struct Config {
 ///     port: Commented<u16>,
 /// }
-/// let c: Config = ayml_serde::from_str(input)?;
+/// let c: Config = ayml::from_str(input)?;
 /// assert_eq!(c.port.value, 8080);
 /// assert_eq!(c.port.top_comment.as_deref(), Some("top comment"));
 /// assert_eq!(c.port.inline_comment.as_deref(), Some("inline comment"));

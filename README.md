@@ -37,9 +37,7 @@ Design goals for AYML are, in decreasing priority:
 
 ## Crates
 
-There are two primary crates:
-
-* `ayml-serde` contains a serde Serializer and Deserializer.
+* `ayml` contains a serde Serializer and Deserializer.
 * `ayml-core` contains a standalone parser and emitter to test spec conformance.
 
 ## Testing
@@ -53,7 +51,7 @@ To run fuzz tests:
 ```bash
 rustup toolchain install nightly
 cargo install cargo-fuzz
-cd ayml-serde/fuzz
+cd ayml/fuzz
 
 # Run the deserialize fuzzer
 cargo +nightly fuzz run fuzz_deserialize

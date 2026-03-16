@@ -1,6 +1,6 @@
-//! Property-based tests for ayml-serde roundtrip and robustness.
+//! Property-based tests for ayml roundtrip and robustness.
 
-use ayml_serde::{Value, from_str, to_string};
+use ayml::{Value, from_str, to_string};
 use indexmap::IndexMap;
 use proptest::prelude::*;
 

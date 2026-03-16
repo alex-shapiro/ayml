@@ -1,6 +1,6 @@
 //! Error handling tests: invalid input, type mismatches, edge cases.
 
-use ayml_serde::from_str;
+use ayml::from_str;
 
 // ── Parse errors ────────────────────────────────────────────────
 
@@ -127,7 +127,7 @@ fn error_char_empty() {
 
 #[test]
 fn error_invalid_utf8_slice() {
-    assert!(ayml_serde::from_slice::<String>(&[0xFF, 0xFE]).is_err());
+    assert!(ayml::from_slice::<String>(&[0xFF, 0xFE]).is_err());
 }
 
 // ── Missing struct fields ───────────────────────────────────────
@@ -179,5 +179,5 @@ fn error_tab_indentation() {
 #[test]
 fn error_from_reader_invalid_utf8() {
     let data: &[u8] = &[0xFF, 0xFE];
-    assert!(ayml_serde::from_reader::<_, String>(data).is_err());
+    assert!(ayml::from_reader::<_, String>(data).is_err());
 }
