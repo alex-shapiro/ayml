@@ -408,3 +408,24 @@ fn looks_like_number_trailing_dot_not_ayml_float() {
         "\"5.\" is not an AYML float and should not be quoted, got: {display}"
     );
 }
+
+#[test]
+fn bare_dash_string_roundtrips() {
+    // Fuzz crash: input "-#V@" parses as Str("-") because # starts a comment.
+    // The serializer must quote "-" since a bare `-` requires a following ns-char.
+    let v: ayml::Value = from_str("-#V@").unwrap();
+    assert_eq!(v, ayml::Value::Str("-".into()));
+    let s = to_string(&v).unwrap();
+    assert_eq!(s, "\"-\"\n");
+    let rt: ayml::Value = from_str(&s).unwrap();
+    assert_eq!(v, rt);
+}
+
+#[test]
+fn bare_colon_string_roundtrips() {
+    // Same class of bug: a bare `:` also requires a following ns-char.
+    let s = to_string(&ayml::Value::Str(":".into())).unwrap();
+    assert_eq!(s, "\":\"\n");
+    let rt: ayml::Value = from_str(&s).unwrap();
+    assert_eq!(rt, ayml::Value::Str(":".into()));
+}

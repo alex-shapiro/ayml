@@ -886,8 +886,10 @@ fn needs_quoting(s: &str) -> bool {
     let bytes = s.as_bytes();
     let first = bytes[0];
 
-    // Starts with `- ` or `: ` (would be parsed as indicator)
-    if bytes.len() >= 2 && (first == b'-' || first == b':') && bytes[1] == b' ' {
+    // `-` and `:` are only valid bare-string starters when followed by ns-char
+    if (first == b'-' || first == b':')
+        && (bytes.len() < 2 || bytes[1] == b' ' || bytes[1] == b'\t')
+    {
         return true;
     }
 
