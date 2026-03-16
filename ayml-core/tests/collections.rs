@@ -26,7 +26,7 @@ fn sequence_of_integers() {
 
 #[test]
 fn sequence_of_mixed() {
-    let input = "- hello\n- 42\n- true\n- null\n- 3.14";
+    let input = "- hello\n- 42\n- true\n- null\n- 3.25";
     let node = parse(input).unwrap();
     let seq = node.value.as_sequence().unwrap();
     assert_eq!(seq.len(), 5);
@@ -34,7 +34,7 @@ fn sequence_of_mixed() {
     assert_eq!(seq[1].value, Value::Int(42));
     assert_eq!(seq[2].value, Value::Bool(true));
     assert!(seq[3].value.is_null());
-    assert_eq!(seq[4].value, Value::Float(3.14));
+    assert_eq!(seq[4].value, Value::Float(3.25));
 }
 
 // ── Block Mappings ───────────────────────────────────────────────

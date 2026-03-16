@@ -19,11 +19,11 @@ duplicate nodes, document prefixes, or other complex features supported by YAML.
 
 The design goals for AYML are, in decreasing priority:
 
-1. AYML should be easy to understand
-1. AYML should be easy to author correctly
-1. AYML should be easy to deserialize into strongly typed data structures
-1. AYML should be expressible in the core types of dynamically typed languages
-1. AYML should incorporate comments as a formal part of the document structure
+1. AYML is easy to understand
+1. AYML is easy to author correctly
+1. AYML is easy to deserialize into strongly typed data structures
+1. AYML is expressible in the core types of dynamically typed languages
+1. AYML incorporates comments as a formal part of the document structure
 
 ## Terminology
 
@@ -864,7 +864,8 @@ context. Bare strings are single-line only. They undergo scalar resolution —
 if the content matches `null`, `true`, `false`, an integer, or a float
 pattern, it is parsed as that type rather than as a string.
 
-A `#` preceded by whitespace starts a comment and terminates the scalar.
+A `#` character is not allowed in bare strings. Use a quoted string for
+values containing `#`.
 
 In a **flow context**, bare strings are additionally terminated by flow
 indicators (`,`, `]`, `}`).
@@ -879,7 +880,6 @@ ns-plain-first-char ::=
 ns-plain-char(BLOCK) ::=
     ( ns-char - c-comment - c-mapping-value )
   | ( ':' [ lookahead = ns-char ] )          # ':' not followed by space
-  | ( [ lookbehind = ns-char ] '#' )         # '#' preceded by non-space
 ```
 
 ```

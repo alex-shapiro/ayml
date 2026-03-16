@@ -10,3 +10,4 @@ cc 0da9e6e54141bd53553c53bca0606898f64f9317cb269bc36d515c5789b35528 # shrinks to
 cc 4294057dd1c83caaf89547f2eb0ef280e62587bc9299e9eba78b52b00abab577 # shrinks to node = Node { comment: None, inline_comment: None, value: Seq([Node { comment: None, inline_comment: None, value: Map({}) }]) }
 cc d537618e3c94b63d48f6178f79f1cb8663d30a13499f26810feba57e74599ce1 # shrinks to node = Node { comment: None, inline_comment: None, value: Str("]") }
 cc 5443c70d434813876787cfedbdaed6367232699e44290753736c6953dc318c4b # shrinks to node = Node { comment: None, inline_comment: None, value: Str("A:") }
+cc 1ab64613c3f8c4f111748bbced7e00ff2062b34a7f503352536af0b86de68e04 # shrinks to node = Node { comment: None, inline_comment: None, value: Str("a#") }

@@ -82,16 +82,23 @@ fn offset_to_line_col(source: &str, offset: usize) -> (usize, usize) {
     let offset = offset.min(source.len());
     let mut line = 1;
     let mut col = 1;
-    for (i, ch) in source.char_indices() {
-        if i >= offset {
-            break;
-        }
-        if ch == '\n' {
+    let bytes = source.as_bytes();
+    let mut i = 0;
+    while i < offset {
+        if bytes[i] == b'\r' {
+            line += 1;
+            col = 1;
+            // If \r\n, skip the \n as part of the same line break
+            if i + 1 < bytes.len() && bytes[i + 1] == b'\n' {
+                i += 1;
+            }
+        } else if bytes[i] == b'\n' {
             line += 1;
             col = 1;
         } else {
             col += 1;
         }
+        i += 1;
     }
     (line, col)
 }

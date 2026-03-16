@@ -48,9 +48,21 @@ fn hash_inside_triple_quoted_not_comment() {
 }
 
 #[test]
-fn hash_preceded_by_nonspace_not_comment() {
-    // In a bare string, `#` preceded by non-space is part of the string
+fn hash_always_terminates_bare_string() {
+    // '#' always terminates a bare string, even without preceding whitespace
     let input = "tag: foo#bar";
+    let node = parse(input).unwrap();
+    let map = node.value.as_mapping().unwrap();
+    assert_eq!(
+        map[&MapKey::String("tag".into())].value,
+        Value::Str("foo".into())
+    );
+}
+
+#[test]
+fn hash_in_quoted_string_is_preserved() {
+    // '#' inside a quoted string is preserved
+    let input = "tag: \"foo#bar\"";
     let node = parse(input).unwrap();
     let map = node.value.as_mapping().unwrap();
     assert_eq!(

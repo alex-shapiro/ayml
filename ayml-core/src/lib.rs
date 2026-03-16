@@ -8,6 +8,7 @@ pub mod parser;
 
 pub use error::{Error, ErrorKind, Span};
 pub use parser::DEFAULT_MAX_DEPTH;
+pub use parser::scanner::Scanner;
 pub use value::{MapKey, Node, Value};
 
 /// Parse an AYML document from a string.

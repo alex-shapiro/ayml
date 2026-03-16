@@ -1,5 +1,6 @@
 # AYML
 
+> [!WARNING]
 > Status: Not Ready For Production Use
 
 Simplified YAML variant built for [Ash](https://ashell.dev)
@@ -7,10 +8,20 @@ Simplified YAML variant built for [Ash](https://ashell.dev)
 AYML is a software configuration language that looks like YAML and acts like JSON.
 It is meant to be a human-friendly, cross language, Unicode based software
 configuration language. Unlike YAML, it is not designed as a fully featured
-data serialization framework. There are no references types, unordered sets,
-duplicate nodes, document prefixes, or other complex features supported by YAML.
+data serialization framework. Most YAML features are omitted by design to avoid
+unintentional or malicious misuse.
 
-## Explicit Nongoals
+## Goals
+
+Design goals for AYML are, in decreasing priority:
+
+1. AYML is easy to understand
+2. AYML is easy to author correctly
+3. AYML is easy to deserialize into strongly typed data structures
+4. AYML is expressible in the core types of dynamically typed languages
+5. AYML incorporates comments as a formal part of the document structure
+
+## Omitted
 
 * YES/NO for booleans
 * tags
@@ -22,4 +33,40 @@ duplicate nodes, document prefixes, or other complex features supported by YAML.
 * `?` indicators
 * directives
 * document prefixes
-* mult-document files
+* multi-document files
+
+## Crates
+
+There are two primary crates:
+
+* `ayml-serde` contains a serde Serializer and Deserializer.
+* `ayml-core` contains a standalone parser and emitter to test spec conformance.
+
+## Testing
+
+AYML is tested with unit tests, integration tests, property tests, and fuzz tests. All but fuzz tests run with `cargo t`.
+
+#### Fuzzing
+
+To run fuzz tests:
+
+```bash
+rustup toolchain install nightly
+cargo install cargo-fuzz
+cd ayml-serde/fuzz
+
+# Run the deserialize fuzzer
+cargo +nightly fuzz run fuzz_deserialize
+
+# Run the roundtrip fuzzer
+cargo +nightly fuzz run fuzz_roundtrip
+
+# Limit to 5 minutes
+cargo +nightly fuzz run fuzz_deserialize -- -max_total_time=300
+```
+
+Fuzz test crashes are saved to `fuzz/artifacts/<target>/`. Reproduce with:
+
+```bash
+cargo +nightly fuzz run fuzz_deserialize fuzz/artifacts/fuzz_deserialize/crash-<hash>
+```

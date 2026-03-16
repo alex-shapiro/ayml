@@ -13,7 +13,17 @@ files:
   - path: /Applications/Visual Studio Code.app/Contents/Resources/app/bin/code
     operations:
     - read
+  - path: /Library/Apple/usr/bin
+    operations:
+    - read
   - path: /Users
+    operations:
+    - read
+  - path: /opt/X11/bin
+    operations:
+    - read
+  - path: ~/.zprofile
+    action: deny
     operations:
     - read
   - path: ~/Library/Application Support/Arc/User Data
@@ -44,13 +54,24 @@ files:
     action: deny
     operations:
     - read
+  - path: ~/Library/Python/3.9/lib/python/site-packages
+    operations:
+    - read
   - path: ~/Projects
+    operations:
+    - read
+  - path: ~/Projects/serde_json/**
+  - path: ~/go/bin
     operations:
     - read
 network:
   rules:
   - host: yaml.org
 exec:
-  rules: []
+  rules:
+  - path: ./ayml-serde/fuzz/target/**
+  - path: ./target/**
+  - path: /opt/homebrew/Cellar/tree/*/bin/tree
+  - path: ~/.cargo/bin/cargo-fuzz
 io_devices:
   rules: []

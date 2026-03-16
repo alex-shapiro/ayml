@@ -1,7 +1,5 @@
-use ayml_core::{MapKey, Node, Value, emit, parse};
+use ayml_core::{ErrorKind, MapKey, Node, Value, emit, parse};
 use indexmap::IndexMap;
-
-// ── Fix 3: Map insertion order is preserved (IndexMap) ──────────
 
 #[test]
 fn mapping_preserves_insertion_order() {
@@ -85,8 +83,6 @@ fn compact_mapping_in_sequence_preserves_order() {
     assert_eq!(keys[1], &MapKey::String("a".into()));
     assert_eq!(keys[2], &MapKey::String("m".into()));
 }
-
-// ── Fix 4: Control characters are properly quoted ───────────────
 
 #[test]
 fn string_with_tab_round_trips() {
@@ -182,4 +178,101 @@ fn bare_string_without_control_chars_stays_unquoted() {
     let node = Node::new(Value::Map(map));
     let emitted = emit(&node);
     assert_eq!(emitted, "key: hello world\n");
+}
+
+#[test]
+fn triple_quoted_trailing_newline_roundtrip() {
+    // String "hello\n" should emit and re-parse as "hello\n", not "hello\n\n"
+    let mut map = IndexMap::new();
+    map.insert(
+        MapKey::String("key".into()),
+        Node::new(Value::Str("hello\n".into())),
+    );
+    let node = Node::new(Value::Map(map));
+    let emitted = emit(&node);
+    let reparsed = parse(&emitted).unwrap();
+    let val = reparsed.value.as_mapping().unwrap();
+    assert_eq!(
+        val[&MapKey::String("key".into())].value,
+        Value::Str("hello\n".into()),
+        "trailing newline roundtrip failed\nemitted:\n{emitted}"
+    );
+}
+
+#[test]
+fn triple_quoted_double_trailing_newline_roundtrip() {
+    let mut map = IndexMap::new();
+    map.insert(
+        MapKey::String("key".into()),
+        Node::new(Value::Str("hello\n\n".into())),
+    );
+    let node = Node::new(Value::Map(map));
+    let emitted = emit(&node);
+    let reparsed = parse(&emitted).unwrap();
+    let val = reparsed.value.as_mapping().unwrap();
+    assert_eq!(
+        val[&MapKey::String("key".into())].value,
+        Value::Str("hello\n\n".into()),
+        "double trailing newline roundtrip failed\nemitted:\n{emitted}"
+    );
+}
+
+#[test]
+fn triple_quoted_no_trailing_newline_roundtrip() {
+    // String "hello\nworld" (no trailing newline) should roundtrip correctly
+    let mut map = IndexMap::new();
+    map.insert(
+        MapKey::String("key".into()),
+        Node::new(Value::Str("hello\nworld".into())),
+    );
+    let node = Node::new(Value::Map(map));
+    let emitted = emit(&node);
+    let reparsed = parse(&emitted).unwrap();
+    let val = reparsed.value.as_mapping().unwrap();
+    assert_eq!(
+        val[&MapKey::String("key".into())].value,
+        Value::Str("hello\nworld".into()),
+        "no trailing newline roundtrip failed\nemitted:\n{emitted}"
+    );
+}
+
+#[test]
+fn error_line_number_with_bare_cr() {
+    // Using bare \r as line breaks, error on line 3
+    let input = "a: 1\rb: 2\ra: 3";
+    let err = parse(input).unwrap_err();
+    assert!(matches!(err.kind, ErrorKind::DuplicateKey(_)));
+    assert_eq!(err.line, 3, "error should be on line 3 with bare CR breaks");
+}
+
+#[test]
+fn error_line_number_with_crlf() {
+    // Using \r\n as line breaks
+    let input = "a: 1\r\nb: 2\r\na: 3";
+    let err = parse(input).unwrap_err();
+    assert!(matches!(err.kind, ErrorKind::DuplicateKey(_)));
+    assert_eq!(err.line, 3, "error should be on line 3 with CRLF breaks");
+}
+
+#[test]
+fn non_printable_in_bare_mapping_key_rejected() {
+    // U+0007 (BEL) is non-printable and should be rejected in bare key
+    let input = "hel\x07lo: value";
+    let err = parse(input).unwrap_err();
+    assert!(
+        matches!(err.kind, ErrorKind::NonPrintable('\x07')),
+        "expected NonPrintable error for BEL in mapping key, got: {:?}",
+        err.kind
+    );
+}
+
+#[test]
+fn non_printable_form_feed_in_mapping_key_rejected() {
+    let input = "hel\x0Clo: value";
+    let err = parse(input).unwrap_err();
+    assert!(
+        matches!(err.kind, ErrorKind::NonPrintable('\x0C')),
+        "expected NonPrintable error for FF in mapping key, got: {:?}",
+        err.kind
+    );
 }
