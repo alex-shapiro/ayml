@@ -71,5 +71,66 @@ pub(crate) fn looks_like_number(s: &str) -> bool {
         return !hex.is_empty() && hex.chars().all(|c| c.is_ascii_hexdigit());
     }
 
-    s.parse::<i64>().is_ok() || s.parse::<f64>().is_ok()
+    // Check decimal integer: optional sign followed by digits only
+    if s.parse::<i64>().is_ok() {
+        return true;
+    }
+
+    // Check AYML float grammar (not Rust's f64::parse, which is more permissive).
+    // AYML requires: digits '.' digits (optional exponent), or digits exponent.
+    // "inf"/"+inf"/"-inf"/"nan" are handled by the reserved-word check above.
+    looks_like_ayml_float(unsigned)
+}
+
+/// Check if `s` matches AYML's float grammar (without sign prefix or special words).
+/// Grammar: `digits '.' digits exponent?` or `digits exponent`.
+fn looks_like_ayml_float(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+
+    // Must start with at least one digit
+    if i >= bytes.len() || !bytes[i].is_ascii_digit() {
+        return false;
+    }
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+
+    if i < bytes.len() && bytes[i] == b'.' {
+        // Fixed/exponential form: digits '.' digits exponent?
+        i += 1;
+        let dot_pos = i;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+        // Must have at least one digit after '.'
+        if i == dot_pos {
+            return false;
+        }
+        // Optional exponent
+        if i < bytes.len() && (bytes[i] == b'e' || bytes[i] == b'E') {
+            return looks_like_exponent(&bytes[i..]);
+        }
+        return i == bytes.len();
+    }
+
+    if i < bytes.len() && (bytes[i] == b'e' || bytes[i] == b'E') {
+        // Pure exponential form: digits exponent
+        return looks_like_exponent(&bytes[i..]);
+    }
+
+    false
+}
+
+/// Check if bytes starting at 'e'/'E' form a valid exponent: `[eE] [+-]? digits+`
+fn looks_like_exponent(bytes: &[u8]) -> bool {
+    let mut i = 1; // skip 'e'/'E'
+    if i < bytes.len() && (bytes[i] == b'+' || bytes[i] == b'-') {
+        i += 1;
+    }
+    let start = i;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    i > start && i == bytes.len()
 }

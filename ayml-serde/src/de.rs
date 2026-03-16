@@ -210,6 +210,10 @@ impl<R: Read> Deserializer<R> {
     }
 
     fn leave_collection(&mut self) {
+        debug_assert!(
+            self.depth > 0,
+            "leave_collection called without matching enter_collection"
+        );
         self.depth -= 1;
     }
 

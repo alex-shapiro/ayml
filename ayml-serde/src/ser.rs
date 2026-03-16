@@ -95,8 +95,8 @@ impl<W: std::io::Write> Serializer<W> {
         Ok(())
     }
 
-    /// Write a triple-quoted string. The closing `"""` is indented to
-    /// match `self.indent`, and each content line is indented accordingly.
+    /// Write a triple-quoted string. The closing `"""` and content lines
+    /// are indented to `self.indent + 2`.
     fn write_triple_quoted(&mut self, v: &str) -> Result<()> {
         // If after_key, the `"""` follows the key on the same line
         if self.after_key {
@@ -882,16 +882,7 @@ fn needs_quoting(s: &str) -> bool {
     }
 
     let bytes = s.as_bytes();
-
-    // Starts with indicator character (except `-` and `:` which are
-    // allowed as ns-plain-first-char when followed by ns-char)
     let first = bytes[0];
-    if matches!(
-        first,
-        b',' | b'[' | b']' | b'{' | b'}' | b'#' | b'"' | b'\\'
-    ) {
-        return true;
-    }
 
     // Starts with `- ` or `: ` (would be parsed as indicator)
     if bytes.len() >= 2 && (first == b'-' || first == b':') && bytes[1] == b' ' {
@@ -906,11 +897,11 @@ fn needs_quoting(s: &str) -> bool {
     // Contains characters that would break bare string parsing
     for (i, &b) in bytes.iter().enumerate() {
         match b {
-            // Control characters, line breaks, or characters needing escaping
-            0x00..=0x08 | 0x0B | 0x0C | 0x0E..=0x1F | 0x7F | b'\n' | b'\r' | b'"' | b'\\' => {
+            // Control characters or characters needing escaping
+            0x00..=0x08 | 0x0B | 0x0C | 0x0E..=0x1F | 0x7F | b'"' | b'\\' => {
                 return true;
             }
-            // Flow indicators and '#' mid-string would break parsing
+            // Flow indicators and '#' anywhere would break parsing
             b',' | b'[' | b']' | b'{' | b'}' | b'#' => return true,
             // `: ` mid-string would be parsed as mapping indicator
             b':' if i + 1 < bytes.len() && bytes[i + 1] == b' ' => return true,

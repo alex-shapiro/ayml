@@ -217,4 +217,34 @@ proptest! {
         let deserialized: Vec<Option<i64>> = from_str(&serialized).unwrap();
         prop_assert_eq!(vals, deserialized);
     }
+
+    /// Strings that Rust's f64::parse accepts but are NOT valid AYML floats
+    /// should round-trip as bare strings (not quoted) via Value Display.
+    #[test]
+    fn non_ayml_float_strings_not_over_quoted(
+        s in prop_oneof![
+            Just(String::from("infinity")),
+            Just(String::from("Infinity")),
+            Just(String::from("INFINITY")),
+            Just(String::from("NaN")),
+            Just(String::from("NAN")),
+            Just(String::from(".5")),
+            Just(String::from("5.")),
+            Just(String::from(".1e2")),
+            Just(String::from("1.")),
+            Just(String::from("1.e5")),
+        ]
+    ) {
+        // These are parseable by Rust's f64::parse but are NOT AYML floats.
+        // They should NOT be considered numbers by AYML's display logic.
+        // When displayed as Value::Str, they should be bare (unquoted).
+        let v = Value::Str(s.clone());
+        let display = format!("{v}");
+        prop_assert!(
+            !display.starts_with('"'),
+            "\"{}\" is not an AYML number and should display bare, got: {}",
+            s,
+            display,
+        );
+    }
 }

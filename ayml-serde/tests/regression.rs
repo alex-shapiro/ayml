@@ -359,3 +359,52 @@ fn value_display_dash_space_prefix() {
         "Str(\"- item\") should be quoted, got: {display}"
     );
 }
+
+#[test]
+fn looks_like_number_infinity_not_ayml_float() {
+    // "infinity" is accepted by Rust's f64::parse but is NOT an AYML float.
+    // The spec only recognizes "inf", "+inf", "-inf", "nan".
+    // "infinity" should display as a bare string, not quoted.
+    use ayml_serde::Value;
+    let v = Value::Str("infinity".into());
+    let display = format!("{v}");
+    assert_eq!(
+        display, "infinity",
+        "\"infinity\" is not an AYML keyword and should not be quoted, got: {display}"
+    );
+}
+
+#[test]
+fn looks_like_number_nan_caps_not_ayml_float() {
+    use ayml_serde::Value;
+    let v = Value::Str("NaN".into());
+    let display = format!("{v}");
+    assert_eq!(
+        display, "NaN",
+        "\"NaN\" is not an AYML keyword (only \"nan\" is) and should not be quoted, got: {display}"
+    );
+}
+
+#[test]
+fn looks_like_number_dot_prefix_not_ayml_float() {
+    // ".5" is accepted by Rust's f64::parse but AYML requires digits before the dot
+    use ayml_serde::Value;
+    let v = Value::Str(".5".into());
+    let display = format!("{v}");
+    assert_eq!(
+        display, ".5",
+        "\".5\" is not an AYML float and should not be quoted, got: {display}"
+    );
+}
+
+#[test]
+fn looks_like_number_trailing_dot_not_ayml_float() {
+    // "5." is accepted by Rust's f64::parse but AYML requires digits after the dot
+    use ayml_serde::Value;
+    let v = Value::Str("5.".into());
+    let display = format!("{v}");
+    assert_eq!(
+        display, "5.",
+        "\"5.\" is not an AYML float and should not be quoted, got: {display}"
+    );
+}
