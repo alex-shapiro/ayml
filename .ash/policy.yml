@@ -20,48 +20,17 @@ files:
     operations:
     - read
   - path: /opt/X11/bin
-    operations:
-    - read
+    action: deny
   - path: ~/.zprofile
     action: deny
     operations:
     - read
-  - path: ~/Library/Application Support/Arc/User Data
+  - path: ~/Library/Application Support/**
     action: deny
-    operations:
-    - read
-  - path: ~/Library/Application Support/BraveSoftware/Brave-Browser
-    action: deny
-    operations:
-    - read
-  - path: ~/Library/Application Support/Chromium
-    action: deny
-    operations:
-    - read
-  - path: ~/Library/Application Support/Google/Chrome
-    action: deny
-    operations:
-    - read
-  - path: ~/Library/Application Support/Microsoft Edge
-    action: deny
-    operations:
-    - read
-  - path: ~/Library/Application Support/Vivaldi
-    action: deny
-    operations:
-    - read
-  - path: ~/Library/Application Support/com.operasoftware.Opera
-    action: deny
-    operations:
-    - read
   - path: ~/Library/Python/3.9/lib/python/site-packages
     operations:
     - read
   - path: ~/Projects
-    operations:
-    - read
-  - path: ~/Projects/serde_json/**
-  - path: ~/go/bin
     operations:
     - read
 network:
