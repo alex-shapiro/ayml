@@ -1,6 +1,6 @@
 //! Deserialization edge cases — things that don't roundtrip but must parse correctly.
 
-use ayml_serde::from_str;
+use ayml::from_str;
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -316,7 +316,7 @@ fn de_from_reader_struct() {
         port: u16,
     }
     let data = b"name: myapp\nport: 3000" as &[u8];
-    let c: Config = ayml_serde::from_reader(data).unwrap();
+    let c: Config = ayml::from_reader(data).unwrap();
     assert_eq!(
         c,
         Config {
@@ -328,8 +328,8 @@ fn de_from_reader_struct() {
 
 #[test]
 fn de_from_slice_basic() {
-    assert_eq!(ayml_serde::from_slice::<i32>(b"42").unwrap(), 42);
-    assert_eq!(ayml_serde::from_slice::<String>(b"hello").unwrap(), "hello");
+    assert_eq!(ayml::from_slice::<i32>(b"42").unwrap(), 42);
+    assert_eq!(ayml::from_slice::<String>(b"hello").unwrap(), "hello");
 }
 
 // ── Struct field rename ─────────────────────────────────────────
@@ -515,7 +515,7 @@ fn de_io_read_no_oom_on_whitespace() {
     // that parsing a finite but large whitespace-only input returns an
     // appropriate error (unexpected end of input) rather than hanging.
     let data = vec![b' '; 64 * 1024];
-    let err = ayml_serde::from_reader::<_, i32>(&data[..]);
+    let err = ayml::from_reader::<_, i32>(&data[..]);
     assert!(err.is_err());
 }
 

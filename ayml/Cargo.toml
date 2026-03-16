@@ -4,4 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-ayml-core = { path = "../ayml-core" }
+indexmap = { version = "2.13.0", features = ["serde"] }
+itoa = "1"
+ryu = "1"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2.0.18"
+
+[dev-dependencies]
+proptest = "1"
+serde_bytes = "0.11"

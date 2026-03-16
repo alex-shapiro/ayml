@@ -1,4 +1,4 @@
-use ayml_serde::Commented;
+use ayml::Commented;
 use serde::{Deserialize, Serialize};
 
 // ── Deserialization tests ───────────────────────────────────────────
@@ -10,7 +10,7 @@ fn de_commented_inline_comment() {
         port: Commented<u16>,
     }
     let input = "port: 8080 # the port\n";
-    let c: Config = ayml_serde::from_str(input).unwrap();
+    let c: Config = ayml::from_str(input).unwrap();
     assert_eq!(c.port.value, 8080);
     assert_eq!(c.port.top_comment, None);
     assert_eq!(c.port.inline_comment.as_deref(), Some("the port"));
@@ -23,7 +23,7 @@ fn de_commented_top_comment() {
         port: Commented<u16>,
     }
     let input = "# listen port\nport: 8080\n";
-    let c: Config = ayml_serde::from_str(input).unwrap();
+    let c: Config = ayml::from_str(input).unwrap();
     assert_eq!(c.port.value, 8080);
     assert_eq!(c.port.top_comment.as_deref(), Some("listen port"));
     assert_eq!(c.port.inline_comment, None);
@@ -36,7 +36,7 @@ fn de_commented_both_comments() {
         port: Commented<u16>,
     }
     let input = "# listen port\nport: 8080 # default\n";
-    let c: Config = ayml_serde::from_str(input).unwrap();
+    let c: Config = ayml::from_str(input).unwrap();
     assert_eq!(c.port.value, 8080);
     assert_eq!(c.port.top_comment.as_deref(), Some("listen port"));
     assert_eq!(c.port.inline_comment.as_deref(), Some("default"));
@@ -49,7 +49,7 @@ fn de_commented_no_comments() {
         port: Commented<u16>,
     }
     let input = "port: 8080\n";
-    let c: Config = ayml_serde::from_str(input).unwrap();
+    let c: Config = ayml::from_str(input).unwrap();
     assert_eq!(c.port.value, 8080);
     assert_eq!(c.port.top_comment, None);
     assert_eq!(c.port.inline_comment, None);
@@ -62,7 +62,7 @@ fn de_commented_multiline_top_comment() {
         port: Commented<u16>,
     }
     let input = "# line one\n# line two\nport: 8080\n";
-    let c: Config = ayml_serde::from_str(input).unwrap();
+    let c: Config = ayml::from_str(input).unwrap();
     assert_eq!(c.port.value, 8080);
     assert_eq!(c.port.top_comment.as_deref(), Some("line one\nline two"));
 }
@@ -74,7 +74,7 @@ fn de_commented_string_value() {
         name: Commented<String>,
     }
     let input = "# the name\nname: hello # greeting\n";
-    let c: Config = ayml_serde::from_str(input).unwrap();
+    let c: Config = ayml::from_str(input).unwrap();
     assert_eq!(c.name.value, "hello");
     assert_eq!(c.name.top_comment.as_deref(), Some("the name"));
     assert_eq!(c.name.inline_comment.as_deref(), Some("greeting"));
@@ -87,7 +87,7 @@ fn de_commented_bool_value() {
         debug: Commented<bool>,
     }
     let input = "debug: true # enable debug\n";
-    let c: Config = ayml_serde::from_str(input).unwrap();
+    let c: Config = ayml::from_str(input).unwrap();
     assert!(c.debug.value);
     assert_eq!(c.debug.inline_comment.as_deref(), Some("enable debug"));
 }
@@ -100,7 +100,7 @@ fn de_commented_multiple_fields() {
         port: Commented<u16>,
     }
     let input = "# hostname\nhost: localhost # server\n# port number\nport: 3000\n";
-    let c: Config = ayml_serde::from_str(input).unwrap();
+    let c: Config = ayml::from_str(input).unwrap();
     assert_eq!(c.host.value, "localhost");
     assert_eq!(c.host.top_comment.as_deref(), Some("hostname"));
     assert_eq!(c.host.inline_comment.as_deref(), Some("server"));
@@ -118,7 +118,7 @@ fn de_commented_mixed_with_plain() {
         debug: bool,
     }
     let input = "host: localhost\n# the port\nport: 8080 # default\ndebug: false\n";
-    let c: Config = ayml_serde::from_str(input).unwrap();
+    let c: Config = ayml::from_str(input).unwrap();
     assert_eq!(c.host, "localhost");
     assert_eq!(c.port.value, 8080);
     assert_eq!(c.port.top_comment.as_deref(), Some("the port"));
@@ -141,7 +141,7 @@ fn ser_commented_inline_comment() {
             value: 8080,
         },
     };
-    let s = ayml_serde::to_string(&c).unwrap();
+    let s = ayml::to_string(&c).unwrap();
     assert_eq!(s, "port: 8080 # the port\n");
 }
 
@@ -158,7 +158,7 @@ fn ser_commented_top_comment() {
             value: 8080,
         },
     };
-    let s = ayml_serde::to_string(&c).unwrap();
+    let s = ayml::to_string(&c).unwrap();
     assert_eq!(s, "port:\n  # listen port\n  8080\n");
 }
 
@@ -175,7 +175,7 @@ fn ser_commented_both_comments() {
             value: 8080,
         },
     };
-    let s = ayml_serde::to_string(&c).unwrap();
+    let s = ayml::to_string(&c).unwrap();
     assert_eq!(s, "port:\n  # listen port\n  8080 # default\n");
 }
 
@@ -192,7 +192,7 @@ fn ser_commented_no_comments() {
             value: 8080,
         },
     };
-    let s = ayml_serde::to_string(&c).unwrap();
+    let s = ayml::to_string(&c).unwrap();
     assert_eq!(s, "port: 8080\n");
 }
 
@@ -209,7 +209,7 @@ fn ser_commented_multiline_top_comment() {
             value: 8080,
         },
     };
-    let s = ayml_serde::to_string(&c).unwrap();
+    let s = ayml::to_string(&c).unwrap();
     assert_eq!(s, "port:\n  # line one\n  # line two\n  8080\n");
 }
 
@@ -222,8 +222,8 @@ fn roundtrip_commented_inline() {
         port: Commented<u16>,
     }
     let input = "port: 8080 # the port\n";
-    let c: Config = ayml_serde::from_str(input).unwrap();
-    let output = ayml_serde::to_string(&c).unwrap();
+    let c: Config = ayml::from_str(input).unwrap();
+    let output = ayml::to_string(&c).unwrap();
     assert_eq!(output, input);
 }
 
@@ -234,8 +234,8 @@ fn roundtrip_commented_no_comments() {
         port: Commented<u16>,
     }
     let input = "port: 8080\n";
-    let c: Config = ayml_serde::from_str(input).unwrap();
-    let output = ayml_serde::to_string(&c).unwrap();
+    let c: Config = ayml::from_str(input).unwrap();
+    let output = ayml::to_string(&c).unwrap();
     assert_eq!(output, input);
 }
 
@@ -246,11 +246,11 @@ fn roundtrip_commented_both_comments() {
         port: Commented<u16>,
     }
     let input = "port:\n  # listen port\n  8080 # default\n";
-    let c: Config = ayml_serde::from_str(input).unwrap();
+    let c: Config = ayml::from_str(input).unwrap();
     assert_eq!(c.port.value, 8080);
     assert_eq!(c.port.top_comment.as_deref(), Some("listen port"));
     assert_eq!(c.port.inline_comment.as_deref(), Some("default"));
-    let output = ayml_serde::to_string(&c).unwrap();
+    let output = ayml::to_string(&c).unwrap();
     assert_eq!(output, input);
 }
 
@@ -273,8 +273,8 @@ fn roundtrip_commented_multiple_fields() {
             value: 3000,
         },
     };
-    let s = ayml_serde::to_string(&c).unwrap();
-    let c2: Config = ayml_serde::from_str(&s).unwrap();
+    let s = ayml::to_string(&c).unwrap();
+    let c2: Config = ayml::from_str(&s).unwrap();
     assert_eq!(c, c2);
 }
 
@@ -290,7 +290,7 @@ fn de_commented_seq_elements() {
     input.push_str("- a\n");
     input.push_str("# second\n");
     input.push_str("- b\n");
-    let l: List = ayml_serde::from_str(&input).unwrap();
+    let l: List = ayml::from_str(&input).unwrap();
     assert_eq!(l.items.len(), 2);
     assert_eq!(l.items[0].value, "a");
     assert_eq!(l.items[0].top_comment.as_deref(), Some("first"));
@@ -317,7 +317,7 @@ fn ser_commented_seq_as_map_value() {
             },
         },
     };
-    let s = ayml_serde::to_string(&o).unwrap();
+    let s = ayml::to_string(&o).unwrap();
     // The comment and "- hello" should both be at indent 4 (under x: / a:)
     assert!(s.contains("    # comment"), "comment at wrong indent:\n{s}");
     assert!(s.contains("    - hello"), "dash at wrong indent:\n{s}");
@@ -325,7 +325,7 @@ fn ser_commented_seq_as_map_value() {
 
 #[test]
 fn ser_commented_seq_as_toplevel_map_value() {
-    use ayml_serde::{CommentedValue, CommentedValueKind};
+    use ayml::{CommentedValue, CommentedValueKind};
     use indexmap::IndexMap;
     let mut m = IndexMap::new();
     m.insert(
@@ -337,13 +337,13 @@ fn ser_commented_seq_as_toplevel_map_value() {
         },
     );
     let v = Commented::new(CommentedValueKind::Map(m));
-    let s = ayml_serde::to_string(&v).unwrap();
+    let s = ayml::to_string(&v).unwrap();
     assert!(s.contains("  # a"), "comment at wrong indent:\n{s}");
 }
 
 #[test]
 fn ser_commented_value_seq_in_map() {
-    use ayml_serde::{CommentedValue, CommentedValueKind};
+    use ayml::{CommentedValue, CommentedValueKind};
     use indexmap::IndexMap;
     let mut inner = IndexMap::new();
     inner.insert(
@@ -360,7 +360,7 @@ fn ser_commented_value_seq_in_map() {
         Commented::new(CommentedValueKind::Map(inner)),
     );
     let v = Commented::new(CommentedValueKind::Map(outer));
-    let s = ayml_serde::to_string(&v).unwrap();
+    let s = ayml::to_string(&v).unwrap();
     assert!(s.contains("    # ?"), "comment at wrong indent:\n{s}");
     assert!(
         s.contains("    - null") || s.contains("  - null"),

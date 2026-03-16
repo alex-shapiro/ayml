@@ -1,6 +1,6 @@
 use std::fmt;
 
-/// Error type for ayml-serde serialization and deserialization.
+/// Error type for ayml serialization and deserialization.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// I/O error

@@ -18,7 +18,13 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 name = "ayml"
 version = "0.1.0"
 dependencies = [
- "ayml-core",
+ "indexmap",
+ "itoa",
+ "proptest",
+ "ryu",
+ "serde",
+ "serde_bytes",
+ "thiserror",
 ]
 
 [[package]]
@@ -27,19 +33,6 @@ version = "0.1.0"
 dependencies = [
  "indexmap",
  "proptest",
-]
-
-[[package]]
-name = "ayml-serde"
-version = "0.1.0"
-dependencies = [
- "indexmap",
- "itoa",
- "proptest",
- "ryu",
- "serde",
- "serde_bytes",
- "thiserror",
 ]
 
 [[package]]

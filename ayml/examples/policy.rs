@@ -5,9 +5,9 @@
 //! Every field is wrapped in `Commented<T>` so that AYML comments can be
 //! attached to any value in the tree and survive round-trips.
 //!
-//! Run: cargo run -p ayml-serde --example policy
+//! Run: cargo run -p ayml --example policy
 
-use ayml_serde::Commented;
+use ayml::Commented;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -409,12 +409,12 @@ fn main() {
     };
 
     // ── Serialize ───────────────────────────────────────────────────
-    let ayml = ayml_serde::to_string(&policy).expect("serialize");
+    let ayml = ayml::to_string(&policy).expect("serialize");
     println!("── Serialized AYML ──\n");
     println!("{ayml}");
 
     // ── Deserialize back ────────────────────────────────────────────
-    let roundtripped: Policy = ayml_serde::from_str(&ayml).expect("deserialize");
+    let roundtripped: Policy = ayml::from_str(&ayml).expect("deserialize");
     assert_eq!(policy, roundtripped, "roundtrip mismatch");
     println!("── Roundtrip OK ──");
 
@@ -426,7 +426,7 @@ rules:
   # second rule
   - host: b
 ";
-    let parsed_net: NetworkPolicy = ayml_serde::from_str(seq_test).expect("parse seq_test");
+    let parsed_net: NetworkPolicy = ayml::from_str(seq_test).expect("parse seq_test");
     println!("Rule 0 top: {:?}", parsed_net.rules[0].top_comment);
     println!("Rule 1 top: {:?}", parsed_net.rules[1].top_comment);
     assert_eq!(
@@ -459,7 +459,7 @@ network:
     ports: all
     precedence: -1
 ";
-    let parsed: Policy = ayml_serde::from_str(hand_written).expect("parse hand-written");
+    let parsed: Policy = ayml::from_str(hand_written).expect("parse hand-written");
 
     let net = parsed.network.as_ref().unwrap();
     assert_eq!(net.top_comment.as_deref(), Some("Network access rules"));
@@ -476,7 +476,7 @@ network:
     assert_eq!(rule1.top_comment.as_deref(), Some("Deny all other traffic"));
 
     // Re-serialize and verify byte-identical roundtrip
-    let reserialized = ayml_serde::to_string(&parsed).expect("reserialize");
+    let reserialized = ayml::to_string(&parsed).expect("reserialize");
     assert_eq!(
         hand_written, reserialized,
         "hand-written roundtrip not identical"

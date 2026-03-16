@@ -4,7 +4,7 @@
 //! BEFORE the fix is applied. After fixing, the attribute/assertion is
 //! updated to verify the correct behavior.
 
-use ayml_serde::{from_str, to_string};
+use ayml::{from_str, to_string};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -189,7 +189,7 @@ fn ser_flow_indicator_in_seq_element() {
 
 #[test]
 fn value_display_str_null_ambiguity() {
-    use ayml_serde::Value;
+    use ayml::Value;
     let v = Value::Str("null".to_string());
     let display = format!("{v}");
     assert_ne!(
@@ -200,7 +200,7 @@ fn value_display_str_null_ambiguity() {
 
 #[test]
 fn value_display_float_int_ambiguity() {
-    use ayml_serde::Value;
+    use ayml::Value;
     let v = Value::Float(1.0);
     let display = format!("{v}");
     assert!(
@@ -211,7 +211,7 @@ fn value_display_float_int_ambiguity() {
 
 #[test]
 fn commented_value_display_str_null_ambiguity() {
-    use ayml_serde::{Commented, CommentedValueKind};
+    use ayml::{Commented, CommentedValueKind};
     let v = Commented {
         top_comment: None,
         value: CommentedValueKind::Str("null".to_string()),
@@ -226,7 +226,7 @@ fn commented_value_display_str_null_ambiguity() {
 
 #[test]
 fn commented_value_display_float_int_ambiguity() {
-    use ayml_serde::{Commented, CommentedValueKind};
+    use ayml::{Commented, CommentedValueKind};
     let v = Commented {
         top_comment: None,
         value: CommentedValueKind::Float(1.0),
@@ -243,7 +243,7 @@ fn commented_value_display_float_int_ambiguity() {
 fn de_reject_unquoted_null_key() {
     let input = "null: 5";
     // When target is Value (untyped), null key should be rejected
-    let result: Result<ayml_serde::Value, _> = from_str(input);
+    let result: Result<ayml::Value, _> = from_str(input);
     assert!(
         result.is_err(),
         "expected error for unquoted null mapping key"
@@ -253,7 +253,7 @@ fn de_reject_unquoted_null_key() {
 #[test]
 fn de_reject_unquoted_nan_key() {
     let input = "nan: 5";
-    let result: Result<ayml_serde::Value, _> = from_str(input);
+    let result: Result<ayml::Value, _> = from_str(input);
     assert!(
         result.is_err(),
         "expected error for unquoted nan mapping key"
@@ -263,7 +263,7 @@ fn de_reject_unquoted_nan_key() {
 #[test]
 fn de_reject_unquoted_inf_key() {
     let input = "inf: 5";
-    let result: Result<ayml_serde::Value, _> = from_str(input);
+    let result: Result<ayml::Value, _> = from_str(input);
     assert!(
         result.is_err(),
         "expected error for unquoted inf mapping key"
@@ -273,7 +273,7 @@ fn de_reject_unquoted_inf_key() {
 #[test]
 fn de_reject_unquoted_float_key() {
     let input = "3.14: 5";
-    let result: Result<ayml_serde::Value, _> = from_str(input);
+    let result: Result<ayml::Value, _> = from_str(input);
     assert!(
         result.is_err(),
         "expected error for unquoted float mapping key"
@@ -329,7 +329,7 @@ fn ser_only_newline_roundtrip() {
 
 #[test]
 fn value_display_leading_space() {
-    use ayml_serde::Value;
+    use ayml::Value;
     let v = Value::Str(" hello".to_string());
     let display = format!("{v}");
     assert!(
@@ -340,7 +340,7 @@ fn value_display_leading_space() {
 
 #[test]
 fn value_display_trailing_space() {
-    use ayml_serde::Value;
+    use ayml::Value;
     let v = Value::Str("hello ".to_string());
     let display = format!("{v}");
     assert!(
@@ -351,7 +351,7 @@ fn value_display_trailing_space() {
 
 #[test]
 fn value_display_dash_space_prefix() {
-    use ayml_serde::Value;
+    use ayml::Value;
     let v = Value::Str("- item".to_string());
     let display = format!("{v}");
     assert!(
@@ -365,7 +365,7 @@ fn looks_like_number_infinity_not_ayml_float() {
     // "infinity" is accepted by Rust's f64::parse but is NOT an AYML float.
     // The spec only recognizes "inf", "+inf", "-inf", "nan".
     // "infinity" should display as a bare string, not quoted.
-    use ayml_serde::Value;
+    use ayml::Value;
     let v = Value::Str("infinity".into());
     let display = format!("{v}");
     assert_eq!(
@@ -376,7 +376,7 @@ fn looks_like_number_infinity_not_ayml_float() {
 
 #[test]
 fn looks_like_number_nan_caps_not_ayml_float() {
-    use ayml_serde::Value;
+    use ayml::Value;
     let v = Value::Str("NaN".into());
     let display = format!("{v}");
     assert_eq!(
@@ -388,7 +388,7 @@ fn looks_like_number_nan_caps_not_ayml_float() {
 #[test]
 fn looks_like_number_dot_prefix_not_ayml_float() {
     // ".5" is accepted by Rust's f64::parse but AYML requires digits before the dot
-    use ayml_serde::Value;
+    use ayml::Value;
     let v = Value::Str(".5".into());
     let display = format!("{v}");
     assert_eq!(
@@ -400,7 +400,7 @@ fn looks_like_number_dot_prefix_not_ayml_float() {
 #[test]
 fn looks_like_number_trailing_dot_not_ayml_float() {
     // "5." is accepted by Rust's f64::parse but AYML requires digits after the dot
-    use ayml_serde::Value;
+    use ayml::Value;
     let v = Value::Str("5.".into());
     let display = format!("{v}");
     assert_eq!(
