@@ -1298,6 +1298,9 @@ impl<'a> Parser<'a> {
                         .to_string();
                     return Ok(text);
                 }
+                Some(ch) if !Scanner::is_printable(ch) => {
+                    return Err(self.scanner.error(ErrorKind::NonPrintable(ch)));
+                }
                 Some(_) => {
                     self.scanner.advance();
                 }

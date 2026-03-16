@@ -68,7 +68,7 @@ fn arb_map_key() -> impl Strategy<Value = String> {
 /// Scalar strings covering bare, quoted, and special cases.
 fn arb_scalar_string() -> impl Strategy<Value = String> {
     prop_oneof![
-        // Simple alphanumeric (bare strings)
+        // Simple alphanumeric
         2 => "[a-zA-Z][a-zA-Z0-9 _-]{0,30}",
         // Strings containing special chars that force quoting
         1 => "[a-zA-Z0-9 :{}\\[\\]#,]{1,20}",
@@ -88,10 +88,22 @@ fn arb_scalar_string() -> impl Strategy<Value = String> {
         1 => Just("42".into()),
         1 => Just("3.25".into()),
         1 => Just("-7".into()),
-        // Strings with control characters (serializer escapes these)
+        // Strings with control characters
         1 => Just("tab\there".into()),
         1 => Just("cr\rhere".into()),
         1 => Just("newline\nhere".into()),
+        // Trailing newline edge cases
+        1 => Just("trailing newline\n".into()),
+        1 => Just("end\n\n".into()),
+        1 => Just("\n".into()),
+        1 => Just("a\nb\n".into()),
+        // Leading/trailing whitespace
+        1 => Just(" leading".into()),
+        1 => Just("trailing ".into()),
+        1 => Just(" both ".into()),
+        // Dash-space prefix
+        1 => Just("- item".into()),
+        1 => Just("- ".into()),
     ]
 }
 

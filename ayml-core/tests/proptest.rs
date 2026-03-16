@@ -27,7 +27,7 @@ fn arb_map_key() -> impl Strategy<Value = MapKey> {
 /// Generate a random string that is safe for AYML bare or quoted scalars.
 fn arb_scalar_string() -> impl Strategy<Value = String> {
     prop_oneof![
-        // Simple alphanumeric (bare strings)
+        // Simple alphanumeric
         "[a-zA-Z][a-zA-Z0-9 _-]{0,30}",
         // Strings containing special chars that force quoting
         "[a-zA-Z0-9 :{}\\[\\]#,]{1,20}",
@@ -52,6 +52,17 @@ fn arb_scalar_string() -> impl Strategy<Value = String> {
         Just("line one\nline two".into()),
         Just("trailing newline\n".into()),
         Just("three\nlines\nhere".into()),
+        // Trailing newline edge cases
+        Just("end\n\n".into()),
+        Just("\n".into()),
+        Just("a\nb\n".into()),
+        // Leading/trailing whitespace
+        Just(" leading".into()),
+        Just("trailing ".into()),
+        Just(" both ".into()),
+        // Dash-space prefix (looks like sequence indicator)
+        Just("- item".into()),
+        Just("- ".into()),
     ]
 }
 

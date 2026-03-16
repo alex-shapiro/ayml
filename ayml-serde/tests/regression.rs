@@ -8,11 +8,6 @@ use ayml_serde::{from_str, to_string};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-// ── BUG 1: Triple-quoted `\0` sentinel collision ────────────────
-//
-// Line continuation uses '\x00' as internal sentinel. A `\0` escape at
-// end-of-line followed by another content line has its NUL + newline stripped.
-
 #[test]
 fn triple_quoted_nul_at_end_of_line() {
     // A triple-quoted string with \0 at end of a line, followed by more content
@@ -21,11 +16,6 @@ fn triple_quoted_nul_at_end_of_line() {
     // After fix: \0 should be preserved and newline should remain
     assert_eq!(result, "hello\0\nworld");
 }
-
-// ── BUG 2: needs_quoting misses tab-before-# ────────────────────
-//
-// `needs_quoting` only checks for space before `#`, but tab before `#`
-// also terminates a bare string.
 
 #[test]
 fn ser_tab_before_hash_needs_quoting() {
@@ -40,16 +30,10 @@ fn ser_tab_before_hash_needs_quoting() {
     assert_eq!(back, input);
 }
 
-// ── BUG 3: needs_quoting misses C1 control chars ────────────────
-//
-// Characters U+0080-U+009F (except U+0085) are non-printable per spec
-// but multi-byte in UTF-8, so the byte-level check misses them.
-
 #[test]
 fn ser_c1_control_char_needs_quoting() {
     let input = "hello\u{0080}world"; // U+0080 is a C1 control char
     let serialized = to_string(&input).unwrap();
-    // After fix: must be quoted and the C1 char escaped
     assert!(
         serialized.starts_with('"'),
         "expected quoted output for C1 control char, got: {serialized}"
@@ -80,11 +64,6 @@ fn ser_c1_nel_u0085_allowed_bare() {
     assert_eq!(back, input, "NEL should round-trip correctly");
 }
 
-// ── BUG 4: Triple-quoted strings containing """ ─────────────────
-//
-// The serializer doesn't escape `"` in triple-quoted content, so `"""`
-// in the string prematurely closes the triple-quoted block.
-
 #[test]
 fn ser_triple_quote_in_content() {
     let input = "line1\nfoo\"\"\"bar";
@@ -106,11 +85,6 @@ fn ser_triple_quote_alone_on_line() {
         "roundtrip failed for string with \"\"\" on its own line\nayml:\n{serialized}"
     );
 }
-
-// ── BUG 5: SerializeStruct field names not quoted ────────────────
-//
-// `SerializeStruct::serialize_field` writes keys via `write_str`
-// instead of `write_key`, so renamed fields aren't quoted.
 
 #[test]
 fn ser_struct_field_renamed_to_reserved() {
@@ -144,11 +118,6 @@ fn ser_struct_field_with_colon_space() {
     );
 }
 
-// ── Verify: deserialize_option correctly handles null followed by `:` ──
-//
-// `null: 5` with unquoted null key is rejected by key validation.
-// But quoted "null" key works for Option<HashMap>.
-
 #[test]
 fn de_option_quoted_null_key_as_map() {
     let input = "\"null\": 5";
@@ -163,14 +132,9 @@ fn de_option_quoted_null_key_as_map() {
 
 #[test]
 fn de_option_plain_null_is_none() {
-    // Standalone `null` (no colon) should deserialize as None
     let result: Option<i32> = from_str("null").unwrap();
     assert_eq!(result, None);
 }
-
-// ── BUG 7: serialize_unit_struct bypasses serializing_key check ──
-//
-// `serialize_unit_struct` writes "null" without checking serializing_key.
 
 #[test]
 fn ser_unit_struct_as_key_rejected() {
@@ -186,13 +150,8 @@ fn ser_unit_struct_as_key_rejected() {
     );
 }
 
-// ── BUG 8: needs_quoting misses flow indicators mid-string ──────
-//
-// Characters like `,`, `]`, `}` mid-string would break in flow context.
-
 #[test]
 fn ser_flow_indicator_in_string_roundtrip() {
-    // These strings contain flow indicators that could break parsing
     let cases = vec!["a,b", "a]b", "a}b", "[hello", "{hello"];
     for input in cases {
         let serialized = to_string(&input).unwrap();
@@ -204,8 +163,6 @@ fn ser_flow_indicator_in_string_roundtrip() {
     }
 }
 
-// Flow indicators in map values (which get serialized in block context)
-// should still roundtrip even if not quoted
 #[test]
 fn ser_flow_indicators_in_map_values() {
     use std::collections::BTreeMap;
@@ -219,7 +176,6 @@ fn ser_flow_indicators_in_map_values() {
     );
 }
 
-// The real danger is flow indicators inside sequences (flow context)
 #[test]
 fn ser_flow_indicator_in_seq_element() {
     let items = vec!["a,b".to_string(), "c]d".to_string()];
@@ -231,17 +187,11 @@ fn ser_flow_indicator_in_seq_element() {
     );
 }
 
-// ── BUG 9: Value/CommentedValueKind Display ambiguity ────────────
-//
-// Str("null") displays as `null`, identical to Null.
-// Float(1.0) displays as `1`, identical to Int(1).
-
 #[test]
 fn value_display_str_null_ambiguity() {
     use ayml_serde::Value;
     let v = Value::Str("null".to_string());
     let display = format!("{v}");
-    // After fix: should be quoted to distinguish from null
     assert_ne!(
         display, "null",
         "Str(\"null\") should not display as bare 'null'"
@@ -253,7 +203,6 @@ fn value_display_float_int_ambiguity() {
     use ayml_serde::Value;
     let v = Value::Float(1.0);
     let display = format!("{v}");
-    // After fix: should always include decimal point
     assert!(
         display.contains('.'),
         "Float(1.0) should display with decimal point, got: {display}"
@@ -289,10 +238,6 @@ fn commented_value_display_float_int_ambiguity() {
         "Float(1.0) should display with decimal point, got: {display}"
     );
 }
-
-// ── BUG 10: Unquoted null/float/nan/inf keys accepted ────────────
-//
-// Spec: "A mapping key MUST NOT resolve to null or float."
 
 #[test]
 fn de_reject_unquoted_null_key() {
@@ -347,4 +292,70 @@ fn de_allow_quoted_nan_key() {
     let input = "\"nan\": 5";
     let result: Result<HashMap<String, i32>, _> = from_str(input);
     assert!(result.is_ok(), "quoted nan key should be allowed");
+}
+
+#[test]
+fn ser_trailing_newline_roundtrip() {
+    let input = "hello\n";
+    let serialized = to_string(&input).unwrap();
+    let back: String = from_str(&serialized).unwrap();
+    assert_eq!(
+        back, input,
+        "trailing newline roundtrip failed\nayml:\n{serialized}"
+    );
+}
+
+#[test]
+fn ser_double_trailing_newline_roundtrip() {
+    let input = "hello\n\n";
+    let serialized = to_string(&input).unwrap();
+    let back: String = from_str(&serialized).unwrap();
+    assert_eq!(
+        back, input,
+        "double trailing newline roundtrip failed\nayml:\n{serialized}"
+    );
+}
+
+#[test]
+fn ser_only_newline_roundtrip() {
+    let input = "\n";
+    let serialized = to_string(&input).unwrap();
+    let back: String = from_str(&serialized).unwrap();
+    assert_eq!(
+        back, input,
+        "single newline roundtrip failed\nayml:\n{serialized}"
+    );
+}
+
+#[test]
+fn value_display_leading_space() {
+    use ayml_serde::Value;
+    let v = Value::Str(" hello".to_string());
+    let display = format!("{v}");
+    assert!(
+        display.starts_with('"'),
+        "Str(\" hello\") should be quoted, got: {display}"
+    );
+}
+
+#[test]
+fn value_display_trailing_space() {
+    use ayml_serde::Value;
+    let v = Value::Str("hello ".to_string());
+    let display = format!("{v}");
+    assert!(
+        display.starts_with('"'),
+        "Str(\"hello \") should be quoted, got: {display}"
+    );
+}
+
+#[test]
+fn value_display_dash_space_prefix() {
+    use ayml_serde::Value;
+    let v = Value::Str("- item".to_string());
+    let display = format!("{v}");
+    assert!(
+        display.starts_with('"'),
+        "Str(\"- item\") should be quoted, got: {display}"
+    );
 }

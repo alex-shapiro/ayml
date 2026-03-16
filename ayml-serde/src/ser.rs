@@ -2,6 +2,7 @@ use serde::Serialize;
 use serde::ser;
 
 use crate::error::{Error, Result};
+use crate::fmt_helpers::looks_like_number;
 
 /// Serialize a `T` to an AYML string.
 ///
@@ -870,6 +871,10 @@ fn capture_option_string<T: ?Sized + Serialize>(value: &T) -> Option<String> {
 
 /// Returns true if the string must be double-quoted in AYML output.
 fn needs_quoting(s: &str) -> bool {
+    if s.is_empty() {
+        return true;
+    }
+
     // Reserved scalar values
     match s {
         "null" | "true" | "false" | "inf" | "+inf" | "-inf" | "nan" => return true,
@@ -953,26 +958,6 @@ fn is_printable_for_bare(ch: char) -> bool {
         0xE000..=0xFFFD |
         0x10000..=0x10_FFFF
     )
-}
-
-/// Check if a string looks like it would be parsed as a number.
-fn looks_like_number(s: &str) -> bool {
-    let unsigned = s
-        .strip_prefix('+')
-        .or_else(|| s.strip_prefix('-'))
-        .unwrap_or(s);
-
-    if let Some(bin) = unsigned.strip_prefix("0b") {
-        return !bin.is_empty() && bin.chars().all(|c| c == '0' || c == '1');
-    }
-    if let Some(oct) = unsigned.strip_prefix("0o") {
-        return !oct.is_empty() && oct.chars().all(|c| matches!(c, '0'..='7'));
-    }
-    if let Some(hex) = unsigned.strip_prefix("0x") {
-        return !hex.is_empty() && hex.chars().all(|c| c.is_ascii_hexdigit());
-    }
-
-    s.parse::<i64>().is_ok() || s.parse::<f64>().is_ok()
 }
 
 /// Write a single escaped character to the writer. Handles all AYML escape

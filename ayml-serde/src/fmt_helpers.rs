@@ -9,6 +9,11 @@ pub(crate) fn display_str(f: &mut fmt::Formatter<'_>, s: &str) -> fmt::Result {
         "null" | "true" | "false" | "inf" | "+inf" | "-inf" | "nan"
     ) || s.is_empty()
         || s.contains(['"', '\\', '\n', ':', ',', '[', ']', '{', '}', '#'])
+        || s.starts_with(' ')
+        || s.starts_with('\t')
+        || s.starts_with('-')
+        || s.ends_with(' ')
+        || s.ends_with('\t')
         || looks_like_number(s);
     if needs_quoting {
         write!(f, "\"")?;
@@ -28,8 +33,6 @@ pub(crate) fn display_str(f: &mut fmt::Formatter<'_>, s: &str) -> fmt::Result {
     }
 }
 
-/// Check if a string looks like it would parse as a number.
-///
 /// Display an f64 in AYML format: nan, inf, -inf, or decimal with `.0` suffix.
 pub(crate) fn display_float(f: &mut fmt::Formatter<'_>, v: f64) -> fmt::Result {
     if v.is_nan() {

@@ -31,7 +31,7 @@ pub fn from_str<'a, T: serde::Deserialize<'a>>(s: &'a str) -> Result<T> {
 /// Returns an error if the input is not valid UTF-8, not valid AYML,
 /// or cannot be deserialized into `T`.
 pub fn from_slice<'a, T: serde::Deserialize<'a>>(bytes: &'a [u8]) -> Result<T> {
-    // Validate UTF-8 upfront — AYML is a text format.
+    // Validate UTF-8 upfront
     let s = std::str::from_utf8(bytes)?;
     from_str(s)
 }
@@ -297,9 +297,16 @@ impl<R: Read> Deserializer<R> {
     }
 
     /// Count leading spaces without consuming them (uses `peek_at`).
+    ///
+    /// Bounded to [`MAX_INDENT`] to prevent unbounded buffer growth on
+    /// pathological input when using `IoRead`.
     fn count_spaces(&mut self) -> Result<usize> {
+        const MAX_INDENT: usize = 1024;
         let mut count = 0;
         loop {
+            if count >= MAX_INDENT {
+                return Err(self.error("indentation exceeds maximum depth"));
+            }
             match self.peek_at(count)? {
                 Some(b' ') => count += 1,
                 Some(b'\t') => {
@@ -842,14 +849,9 @@ impl<R: Read> Deserializer<R> {
     ///
     /// Returns an empty string if no recording is active (this happens during
     /// serde `Content`-based replay for untagged enums).
-    ///
-    /// # Panics
-    ///
-    /// Panics if the recorded bytes are not valid UTF-8 (which indicates a
-    /// parser bug).
-    fn stop_recording(&mut self) -> String {
+    fn stop_recording(&mut self) -> Result<String> {
         let bytes = self.recording.take().unwrap_or_default();
-        String::from_utf8(bytes).expect("recorded bytes are not valid UTF-8")
+        Ok(String::from_utf8(bytes)?)
     }
 
     /// Check if the upcoming bytes spell "null" followed by a terminator.
@@ -876,7 +878,7 @@ impl<'de, R: Read> de::Deserializer<'de> for &mut Deserializer<R> {
                 let start_indent = self.current_indent();
                 self.start_recording();
                 let s = self.scan_quoted_string()?;
-                let raw = self.stop_recording();
+                let raw = self.stop_recording()?;
                 if !self.reading_key && self.ctx == Context::Block {
                     self.skip_inline_whitespace()?;
                     if self.is_mapping_value_indicator()? {
@@ -935,7 +937,7 @@ impl<'de, R: Read> de::Deserializer<'de> for &mut Deserializer<R> {
                 let start_offset = self.byte_offset();
                 self.start_recording();
                 let text = self.scan_bare_string(self.ctx)?;
-                let raw = self.stop_recording();
+                let raw = self.stop_recording()?;
                 if !self.reading_key && self.ctx == Context::Block {
                     self.skip_inline_whitespace()?;
                     if self.is_mapping_value_indicator()? {
@@ -1425,7 +1427,7 @@ impl<'de, R: Read> de::MapAccess<'de> for MapAccess<'_, R> {
                 self.de.reading_key = true;
                 self.de.start_recording();
                 let key = seed.deserialize(&mut *self.de)?;
-                let key_text = self.de.stop_recording();
+                let key_text = self.de.stop_recording()?;
                 self.de.reading_key = false;
                 self.validate_key(&key_text)?;
                 if !self.seen_keys.insert(key_text.clone()) {
@@ -1477,7 +1479,7 @@ impl<'de, R: Read> de::MapAccess<'de> for MapAccess<'_, R> {
                 self.de.reading_key = true;
                 self.de.start_recording();
                 let key = seed.deserialize(&mut *self.de)?;
-                let key_text = self.de.stop_recording();
+                let key_text = self.de.stop_recording()?;
                 self.de.reading_key = false;
                 self.validate_key(&key_text)?;
                 if !self.seen_keys.insert(key_text.clone()) {
@@ -1728,16 +1730,19 @@ fn is_indicator_byte(b: u8) -> bool {
 }
 
 /// Check if a byte can start a plain (bare) scalar.
+///
+/// Note: `-` and `:` require a lookahead check (must be followed by `ns-char`).
+/// They are handled by the caller before this function is reached, so this
+/// function correctly returns `false` for all indicator bytes.
 fn is_plain_first_byte(b: u8) -> bool {
     if b >= 0x80 {
         // Start of multi-byte UTF-8 — allowed as plain first
         return true;
     }
     if is_indicator_byte(b) {
-        b == b'-' || b == b':'
-    } else {
-        !is_ascii_whitespace(b) && is_printable_byte_start(b)
+        return false;
     }
+    !is_ascii_whitespace(b) && is_printable_byte_start(b)
 }
 
 /// Check if byte is a valid start for printable content.
