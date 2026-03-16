@@ -112,7 +112,35 @@ fn de_commented_value_float() {
 #[test]
 fn display_commented_value() {
     let cv = CommentedValue {
-        top_comment: Some("ignored by display".into()),
+        top_comment: Some("a top comment".into()),
+        inline_comment: None,
+        value: CommentedValueKind::Int(42),
+    };
+    assert_eq!(format!("{cv}"), "# a top comment\n42");
+
+    let cv = CommentedValue {
+        top_comment: None,
+        inline_comment: Some("an inline comment".into()),
+        value: CommentedValueKind::Int(42),
+    };
+    assert_eq!(format!("{cv}"), "42 # an inline comment");
+
+    let cv = CommentedValue {
+        top_comment: Some("top".into()),
+        inline_comment: Some("inline".into()),
+        value: CommentedValueKind::Int(42),
+    };
+    assert_eq!(format!("{cv}"), "# top\n42 # inline");
+
+    let cv = CommentedValue {
+        top_comment: Some("line 1\nline 2".into()),
+        inline_comment: None,
+        value: CommentedValueKind::Int(42),
+    };
+    assert_eq!(format!("{cv}"), "# line 1\n# line 2\n42");
+
+    let cv = CommentedValue {
+        top_comment: None,
         inline_comment: None,
         value: CommentedValueKind::Int(42),
     };

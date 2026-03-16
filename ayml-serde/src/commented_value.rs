@@ -205,6 +205,15 @@ impl fmt::Display for CommentedValueKind {
 
 impl fmt::Display for CommentedValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.value.fmt(f)
+        if let Some(ref comment) = self.top_comment {
+            for line in comment.lines() {
+                writeln!(f, "# {line}")?;
+            }
+        }
+        self.value.fmt(f)?;
+        if let Some(ref comment) = self.inline_comment {
+            write!(f, " # {comment}")?;
+        }
+        Ok(())
     }
 }
