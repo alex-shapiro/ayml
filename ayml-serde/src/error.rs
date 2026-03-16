@@ -1,30 +1,23 @@
 use std::fmt;
 
 /// Error type for ayml-serde serialization and deserialization.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// A custom message from serde or this crate.
-    Message(String),
-    /// An I/O error (from `from_reader` / `to_writer`).
+    /// I/O error
+    #[error(transparent)]
     Io(std::io::Error),
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Error::Message(msg) => f.write_str(msg),
-            Error::Io(e) => write!(f, "I/O error: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Error::Message(_) => None,
-            Error::Io(e) => Some(e),
-        }
-    }
+    /// UTF-8 Error
+    #[error(transparent)]
+    Utf8(#[from] std::str::Utf8Error),
+    /// String From UTF-8 Error
+    #[error(transparent)]
+    FromUtf8(#[from] std::string::FromUtf8Error),
+    /// Unexpected Error
+    #[error("unexpected")]
+    Unexpected,
+    /// A custom message from serde or this crate.
+    #[error("{0}")]
+    Message(String),
 }
 
 impl serde::de::Error for Error {

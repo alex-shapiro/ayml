@@ -11,7 +11,7 @@ use crate::error::{Error, Result};
 pub fn to_string<T: Serialize>(value: &T) -> Result<String> {
     let mut buf = Vec::new();
     to_writer(&mut buf, value)?;
-    String::from_utf8(buf).map_err(|_| Error::Message("serializer produced invalid UTF-8".into()))
+    Ok(String::from_utf8(buf)?)
 }
 
 /// Serialize a `T` to an AYML byte vector.
@@ -825,17 +825,17 @@ fn capture_option_string<T: ?Sized + Serialize>(value: &T) -> Option<String> {
             Ok(None)
         }
         fn serialize_seq(self, _: Option<usize>) -> Result<Self::SerializeSeq> {
-            Err(Error::Message("unexpected".into()))
+            Err(Error::Unexpected)
         }
         fn serialize_tuple(self, _: usize) -> Result<Self::SerializeTuple> {
-            Err(Error::Message("unexpected".into()))
+            Err(Error::Unexpected)
         }
         fn serialize_tuple_struct(
             self,
             _: &'static str,
             _: usize,
         ) -> Result<Self::SerializeTupleStruct> {
-            Err(Error::Message("unexpected".into()))
+            Err(Error::Unexpected)
         }
         fn serialize_tuple_variant(
             self,
@@ -844,13 +844,13 @@ fn capture_option_string<T: ?Sized + Serialize>(value: &T) -> Option<String> {
             _: &'static str,
             _: usize,
         ) -> Result<Self::SerializeTupleVariant> {
-            Err(Error::Message("unexpected".into()))
+            Err(Error::Unexpected)
         }
         fn serialize_map(self, _: Option<usize>) -> Result<Self::SerializeMap> {
-            Err(Error::Message("unexpected".into()))
+            Err(Error::Unexpected)
         }
         fn serialize_struct(self, _: &'static str, _: usize) -> Result<Self::SerializeStruct> {
-            Err(Error::Message("unexpected".into()))
+            Err(Error::Unexpected)
         }
         fn serialize_struct_variant(
             self,
@@ -859,7 +859,7 @@ fn capture_option_string<T: ?Sized + Serialize>(value: &T) -> Option<String> {
             _: &'static str,
             _: usize,
         ) -> Result<Self::SerializeStructVariant> {
-            Err(Error::Message("unexpected".into()))
+            Err(Error::Unexpected)
         }
     }
 

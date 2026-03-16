@@ -32,8 +32,7 @@ pub fn from_str<'a, T: serde::Deserialize<'a>>(s: &'a str) -> Result<T> {
 /// or cannot be deserialized into `T`.
 pub fn from_slice<'a, T: serde::Deserialize<'a>>(bytes: &'a [u8]) -> Result<T> {
     // Validate UTF-8 upfront — AYML is a text format.
-    let s =
-        std::str::from_utf8(bytes).map_err(|e| Error::Message(format!("invalid UTF-8: {e}")))?;
+    let s = std::str::from_utf8(bytes)?;
     from_str(s)
 }
 
@@ -272,8 +271,7 @@ impl<R: Read> Deserializer<R> {
         }
         let mut buf = Vec::new();
         self.rest_of_line_into(&mut buf)?;
-        let text = String::from_utf8(buf)
-            .map_err(|e| Error::Message(format!("invalid UTF-8 in comment: {e}")))?;
+        let text = String::from_utf8(buf)?;
         match &mut self.pending_top_comment {
             Some(existing) => {
                 existing.push('\n');
@@ -456,8 +454,7 @@ impl<R: Read> Deserializer<R> {
             match self.peek()? {
                 Some(b'"') => {
                     self.next_byte()?;
-                    let s = String::from_utf8(std::mem::take(&mut self.scratch))
-                        .map_err(|e| Error::Message(format!("invalid UTF-8: {e}")))?;
+                    let s = String::from_utf8(std::mem::take(&mut self.scratch))?;
                     return Ok(s);
                 }
                 Some(b'\\') => {
@@ -577,8 +574,7 @@ impl<R: Read> Deserializer<R> {
             // Content line: read entire raw line (including leading spaces)
             let mut line_buf = Vec::new();
             self.rest_of_line_into(&mut line_buf)?;
-            let line = String::from_utf8(line_buf)
-                .map_err(|e| Error::Message(format!("invalid UTF-8: {e}")))?;
+            let line = String::from_utf8(line_buf)?;
             raw_lines.push(line);
 
             if !self.eat_break()? && !self.is_eof()? {
@@ -717,8 +713,7 @@ impl<R: Read> Deserializer<R> {
 
             if self.is_break_or_eof()? {
                 self.scratch.truncate(ws_mark);
-                let s = String::from_utf8(std::mem::take(&mut self.scratch))
-                    .map_err(|e| Error::Message(format!("invalid UTF-8: {e}")))?;
+                let s = String::from_utf8(std::mem::take(&mut self.scratch))?;
                 return Ok(s);
             }
 
@@ -726,8 +721,7 @@ impl<R: Read> Deserializer<R> {
                 Some(b'#') => {
                     // '#' terminates bare strings; drop trailing ws
                     self.scratch.truncate(ws_mark);
-                    let s = String::from_utf8(std::mem::take(&mut self.scratch))
-                        .map_err(|e| Error::Message(format!("invalid UTF-8: {e}")))?;
+                    let s = String::from_utf8(std::mem::take(&mut self.scratch))?;
                     return Ok(s);
                 }
                 Some(b':') => {
@@ -740,8 +734,7 @@ impl<R: Read> Deserializer<R> {
                     {
                         // Mapping value indicator — drop trailing ws
                         self.scratch.truncate(ws_mark);
-                        let s = String::from_utf8(std::mem::take(&mut self.scratch))
-                            .map_err(|e| Error::Message(format!("invalid UTF-8: {e}")))?;
+                        let s = String::from_utf8(std::mem::take(&mut self.scratch))?;
                         return Ok(s);
                     }
                     self.next_byte()?;
@@ -749,8 +742,7 @@ impl<R: Read> Deserializer<R> {
                 }
                 Some(b',' | b']' | b'}') if ctx == Context::Flow => {
                     self.scratch.truncate(ws_mark);
-                    let s = String::from_utf8(std::mem::take(&mut self.scratch))
-                        .map_err(|e| Error::Message(format!("invalid UTF-8: {e}")))?;
+                    let s = String::from_utf8(std::mem::take(&mut self.scratch))?;
                     return Ok(s);
                 }
                 Some(b) if b < 0x20 && b != b'\t' => {
@@ -767,8 +759,7 @@ impl<R: Read> Deserializer<R> {
                 }
                 None => {
                     self.scratch.truncate(ws_mark);
-                    let s = String::from_utf8(std::mem::take(&mut self.scratch))
-                        .map_err(|e| Error::Message(format!("invalid UTF-8: {e}")))?;
+                    let s = String::from_utf8(std::mem::take(&mut self.scratch))?;
                     return Ok(s);
                 }
             }
@@ -835,8 +826,7 @@ impl<R: Read> Deserializer<R> {
             }
             let mut buf = Vec::new();
             self.rest_of_line_into(&mut buf)?;
-            let text = String::from_utf8(buf)
-                .map_err(|e| Error::Message(format!("invalid UTF-8 in comment: {e}")))?;
+            let text = String::from_utf8(buf)?;
             Ok(Some(text))
         } else {
             Ok(None)
