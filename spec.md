@@ -4,8 +4,8 @@
 
 **Status of this Document**
 
-This is the **AYML specification v1.0**.
-It defines the **AYML 1.0 data language**.
+This is the AYML specification v1.0.
+It defines the AYML 1.0 data language.
 
 ## Abstract
 
