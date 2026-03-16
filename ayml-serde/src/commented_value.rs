@@ -5,7 +5,7 @@
 //! (sequences and mappings) are themselves `CommentedValue`s.
 
 use crate::Commented;
-use crate::fmt_helpers::display_str;
+use crate::fmt_helpers::{display_float, display_str};
 use indexmap::IndexMap;
 use serde::de::{self, Visitor};
 use serde::ser;
@@ -159,24 +159,7 @@ impl fmt::Display for CommentedValueKind {
             Self::Null => write!(f, "null"),
             Self::Bool(b) => write!(f, "{b}"),
             Self::Int(i) => write!(f, "{i}"),
-            Self::Float(v) => {
-                if v.is_nan() {
-                    write!(f, "nan")
-                } else if v.is_infinite() {
-                    if v.is_sign_positive() {
-                        write!(f, "inf")
-                    } else {
-                        write!(f, "-inf")
-                    }
-                } else {
-                    let s = format!("{v}");
-                    if s.contains('.') || s.contains('e') || s.contains('E') {
-                        write!(f, "{s}")
-                    } else {
-                        write!(f, "{s}.0")
-                    }
-                }
-            }
+            Self::Float(v) => display_float(f, *v),
             Self::Str(s) => display_str(f, s),
             Self::Seq(v) => {
                 write!(f, "[")?;

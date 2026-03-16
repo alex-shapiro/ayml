@@ -45,6 +45,12 @@ impl<'a> Scanner<'a> {
         self.input[self.offset..].chars().nth(n)
     }
 
+    /// Peek at the byte `n` bytes ahead of the current offset. O(1).
+    #[must_use]
+    pub fn peek_byte_at(&self, n: usize) -> Option<u8> {
+        self.bytes.get(self.offset + n).copied()
+    }
+
     /// Advance past the current character and return it.
     pub fn advance(&mut self) -> Option<char> {
         let ch = self.peek()?;

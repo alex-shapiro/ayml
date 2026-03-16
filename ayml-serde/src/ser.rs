@@ -74,18 +74,22 @@ impl<W: std::io::Write> Serializer<W> {
         self.writer.write_all(s.as_bytes()).map_err(Error::from)
     }
 
+    fn write_spaces(&mut self, count: usize) -> Result<()> {
+        const SPACES: &[u8; 32] = b"                                ";
+        let mut n = count;
+        while n > 0 {
+            let chunk = n.min(SPACES.len());
+            self.writer
+                .write_all(&SPACES[..chunk])
+                .map_err(Error::from)?;
+            n -= chunk;
+        }
+        Ok(())
+    }
+
     fn write_indent(&mut self) -> Result<()> {
         if self.indent > 0 {
-            // Avoid allocation for common indent depths
-            const SPACES: &[u8; 32] = b"                                ";
-            let mut n = self.indent;
-            while n > 0 {
-                let chunk = n.min(SPACES.len());
-                self.writer
-                    .write_all(&SPACES[..chunk])
-                    .map_err(Error::from)?;
-                n -= chunk;
-            }
+            self.write_spaces(self.indent)?;
         }
         Ok(())
     }
@@ -104,9 +108,7 @@ impl<W: std::io::Write> Serializer<W> {
             if line.is_empty() {
                 self.write_str("\n")?;
             } else {
-                for _ in 0..content_indent {
-                    self.write_str(" ")?;
-                }
+                self.write_spaces(content_indent)?;
                 // Escape characters that need escaping in triple-quoted strings
                 // (same as double-quoted, except `"` doesn't need escaping
                 // and `\n` is represented by actual newlines)
@@ -114,9 +116,7 @@ impl<W: std::io::Write> Serializer<W> {
                 self.write_str("\n")?;
             }
         }
-        for _ in 0..content_indent {
-            self.write_str(" ")?;
-        }
+        self.write_spaces(content_indent)?;
         self.write_str("\"\"\"")
     }
 
@@ -592,9 +592,7 @@ impl<W: std::io::Write> Compound<'_, W> {
                     // no longer applies.
                     self.ser.compact = false;
                     for line in comment.lines() {
-                        for _ in 0..comment_indent {
-                            self.ser.write_str(" ")?;
-                        }
+                        self.ser.write_spaces(comment_indent)?;
                         self.ser.write_str("# ")?;
                         self.ser.write_str(line)?;
                         self.ser.write_str("\n")?;
@@ -607,9 +605,7 @@ impl<W: std::io::Write> Compound<'_, W> {
                     } else {
                         self.ser.indent
                     };
-                    for _ in 0..value_indent {
-                        self.ser.write_str(" ")?;
-                    }
+                    self.ser.write_spaces(value_indent)?;
                     self.ser.flush_pending_dash()?;
                     self.ser.compact = true;
                 }
@@ -961,67 +957,67 @@ fn is_printable_for_bare(ch: char) -> bool {
 
 /// Check if a string looks like it would be parsed as a number.
 fn looks_like_number(s: &str) -> bool {
-    let s = s
+    let unsigned = s
         .strip_prefix('+')
         .or_else(|| s.strip_prefix('-'))
         .unwrap_or(s);
-    if s.is_empty() {
-        return false;
+
+    if let Some(bin) = unsigned.strip_prefix("0b") {
+        return !bin.is_empty() && bin.chars().all(|c| c == '0' || c == '1');
+    }
+    if let Some(oct) = unsigned.strip_prefix("0o") {
+        return !oct.is_empty() && oct.chars().all(|c| matches!(c, '0'..='7'));
+    }
+    if let Some(hex) = unsigned.strip_prefix("0x") {
+        return !hex.is_empty() && hex.chars().all(|c| c.is_ascii_hexdigit());
     }
 
-    // 0b, 0o, 0x prefixes
-    if s.starts_with("0b") || s.starts_with("0o") || s.starts_with("0x") {
-        return true;
-    }
+    s.parse::<i64>().is_ok() || s.parse::<f64>().is_ok()
+}
 
-    // All digits → integer
-    if s.chars().all(|c| c.is_ascii_digit()) {
-        return true;
-    }
-
-    // Contains dot or e/E with digits → float
-    if s.contains('.') || s.contains('e') || s.contains('E') {
-        // Quick check: starts with digit
-        if s.as_bytes()[0].is_ascii_digit() {
-            return true;
+/// Write a single escaped character to the writer. Handles all AYML escape
+/// sequences. When `escape_double_quote` is true, `"` is escaped as `\"`;
+/// otherwise it is written literally (for triple-quoted strings).
+fn write_escaped_char<W: std::io::Write>(
+    w: &mut W,
+    ch: char,
+    escape_double_quote: bool,
+) -> std::io::Result<()> {
+    match ch {
+        '\0' => w.write_all(b"\\0"),
+        '\x07' => w.write_all(b"\\a"),
+        '\x08' => w.write_all(b"\\b"),
+        '\t' => w.write_all(b"\\t"),
+        '\n' => w.write_all(b"\\n"),
+        '\x0B' => w.write_all(b"\\v"),
+        '\x0C' => w.write_all(b"\\f"),
+        '\r' => w.write_all(b"\\r"),
+        '\x1B' => w.write_all(b"\\e"),
+        '"' if escape_double_quote => w.write_all(b"\\\""),
+        '\\' => w.write_all(b"\\\\"),
+        c if c.is_control() => {
+            let cp = c as u32;
+            if cp <= 0xFF {
+                write!(w, "\\x{cp:02x}")
+            } else if cp <= 0xFFFF {
+                write!(w, "\\u{cp:04x}")
+            } else {
+                write!(w, "\\U{cp:08x}")
+            }
+        }
+        c => {
+            let mut buf = [0u8; 4];
+            let s = c.encode_utf8(&mut buf);
+            w.write_all(s.as_bytes())
         }
     }
-
-    false
 }
 
 /// Write a double-quoted AYML string with escaping.
 fn write_quoted<W: std::io::Write>(w: &mut W, s: &str) -> std::io::Result<()> {
     w.write_all(b"\"")?;
     for ch in s.chars() {
-        match ch {
-            '\0' => w.write_all(b"\\0")?,
-            '\x07' => w.write_all(b"\\a")?,
-            '\x08' => w.write_all(b"\\b")?,
-            '\t' => w.write_all(b"\\t")?,
-            '\n' => w.write_all(b"\\n")?,
-            '\x0B' => w.write_all(b"\\v")?,
-            '\x0C' => w.write_all(b"\\f")?,
-            '\r' => w.write_all(b"\\r")?,
-            '\x1B' => w.write_all(b"\\e")?,
-            '"' => w.write_all(b"\\\"")?,
-            '\\' => w.write_all(b"\\\\")?,
-            c if c.is_control() => {
-                let cp = c as u32;
-                if cp <= 0xFF {
-                    write!(w, "\\x{cp:02x}")?;
-                } else if cp <= 0xFFFF {
-                    write!(w, "\\u{cp:04x}")?;
-                } else {
-                    write!(w, "\\U{cp:08x}")?;
-                }
-            }
-            c => {
-                let mut buf = [0u8; 4];
-                let s = c.encode_utf8(&mut buf);
-                w.write_all(s.as_bytes())?;
-            }
-        }
+        write_escaped_char(w, ch, true)?;
     }
     w.write_all(b"\"")?;
     Ok(())
@@ -1032,47 +1028,18 @@ fn write_quoted<W: std::io::Write>(w: &mut W, s: &str) -> std::io::Result<()> {
 fn write_triple_quoted_line<W: std::io::Write>(w: &mut W, line: &str) -> std::io::Result<()> {
     let mut consecutive_quotes = 0u32;
     for ch in line.chars() {
-        match ch {
-            '"' => {
-                consecutive_quotes += 1;
-                if consecutive_quotes == 3 {
-                    // Break the `"""` sequence by escaping this quote
-                    w.write_all(b"\\\"")?;
-                    consecutive_quotes = 0;
-                } else {
-                    w.write_all(b"\"")?;
-                }
-            }
-            other => {
+        if ch == '"' {
+            consecutive_quotes += 1;
+            if consecutive_quotes == 3 {
+                // Break the `"""` sequence by escaping this quote
+                w.write_all(b"\\\"")?;
                 consecutive_quotes = 0;
-                match other {
-                    '\0' => w.write_all(b"\\0")?,
-                    '\x07' => w.write_all(b"\\a")?,
-                    '\x08' => w.write_all(b"\\b")?,
-                    '\t' => w.write_all(b"\\t")?,
-                    // \n shouldn't appear here (lines are split on \n)
-                    '\x0B' => w.write_all(b"\\v")?,
-                    '\x0C' => w.write_all(b"\\f")?,
-                    '\r' => w.write_all(b"\\r")?,
-                    '\x1B' => w.write_all(b"\\e")?,
-                    '\\' => w.write_all(b"\\\\")?,
-                    c if c.is_control() => {
-                        let cp = c as u32;
-                        if cp <= 0xFF {
-                            write!(w, "\\x{cp:02x}")?;
-                        } else if cp <= 0xFFFF {
-                            write!(w, "\\u{cp:04x}")?;
-                        } else {
-                            write!(w, "\\U{cp:08x}")?;
-                        }
-                    }
-                    c => {
-                        let mut buf = [0u8; 4];
-                        let s = c.encode_utf8(&mut buf);
-                        w.write_all(s.as_bytes())?;
-                    }
-                }
+            } else {
+                w.write_all(b"\"")?;
             }
+        } else {
+            consecutive_quotes = 0;
+            write_escaped_char(w, ch, false)?;
         }
     }
     Ok(())

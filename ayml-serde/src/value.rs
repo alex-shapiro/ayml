@@ -5,7 +5,7 @@ use serde::Serialize;
 use serde::de::{self, Deserializer, Visitor};
 use std::fmt;
 
-use crate::fmt_helpers::display_str;
+use crate::fmt_helpers::{display_float, display_str};
 
 /// An untyped AYML value that can represent any AYML document.
 ///
@@ -131,24 +131,7 @@ impl fmt::Display for Value {
             Value::Null => write!(f, "null"),
             Value::Bool(b) => write!(f, "{b}"),
             Value::Int(i) => write!(f, "{i}"),
-            Value::Float(v) => {
-                if v.is_nan() {
-                    write!(f, "nan")
-                } else if v.is_infinite() {
-                    if v.is_sign_positive() {
-                        write!(f, "inf")
-                    } else {
-                        write!(f, "-inf")
-                    }
-                } else {
-                    let s = format!("{v}");
-                    if s.contains('.') || s.contains('e') || s.contains('E') {
-                        write!(f, "{s}")
-                    } else {
-                        write!(f, "{s}.0")
-                    }
-                }
-            }
+            Value::Float(v) => display_float(f, *v),
             Value::Str(s) => display_str(f, s),
             Value::Seq(v) => {
                 write!(f, "[")?;

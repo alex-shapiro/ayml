@@ -242,6 +242,12 @@ fn emit_map_key(out: &mut String, key: &MapKey) {
                     match ch {
                         '"' => out.push_str("\\\""),
                         '\\' => out.push_str("\\\\"),
+                        '\n' => out.push_str("\\n"),
+                        '\r' => out.push_str("\\r"),
+                        '\t' => out.push_str("\\t"),
+                        ch if ch.is_control() => {
+                            let _ = write!(out, "\\u{:04X}", ch as u32);
+                        }
                         _ => out.push(ch),
                     }
                 }

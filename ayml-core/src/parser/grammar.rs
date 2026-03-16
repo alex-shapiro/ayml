@@ -140,7 +140,7 @@ impl<'a> Parser<'a> {
             // the tab will be rejected by the main parse path.
             let spaces = self.scanner.count_spaces().unwrap_or(0);
             // l-comment(n): comment indent must be <= n, and line must start with `#`
-            if spaces > n || self.scanner.peek_nth(spaces) != Some('#') {
+            if spaces > n || self.scanner.peek_byte_at(spaces) != Some(b'#') {
                 self.scanner.offset = saved;
                 break;
             }
@@ -247,7 +247,7 @@ impl<'a> Parser<'a> {
                 break;
             };
 
-            if spaces <= n && self.scanner.peek_nth(spaces) == Some('#') {
+            if spaces <= n && self.scanner.peek_byte_at(spaces) == Some(b'#') {
                 self.scanner.eat_spaces(spaces);
                 self.scanner.advance(); // `#`
                 let _ = self.scanner.rest_of_line();
@@ -436,6 +436,8 @@ impl<'a> Parser<'a> {
     fn take_hex(
         chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
         n: usize,
+        start: usize,
+        source: &str,
     ) -> Result<char, Error> {
         let mut value: u32 = 0;
         for _ in 0..n {
@@ -446,8 +448,8 @@ impl<'a> Parser<'a> {
                 _ => {
                     return Err(Error::new(
                         ErrorKind::InvalidEscape(format!("expected {n} hex digits")),
-                        Span::point(0),
-                        "",
+                        Span::point(start),
+                        source,
                     ));
                 }
             }
@@ -455,8 +457,8 @@ impl<'a> Parser<'a> {
         char::from_u32(value).ok_or_else(|| {
             Error::new(
                 ErrorKind::InvalidEscape(format!("invalid unicode code point U+{value:04X}")),
-                Span::point(0),
-                "",
+                Span::point(start),
+                source,
             )
         })
     }
@@ -534,9 +536,9 @@ impl<'a> Parser<'a> {
                     source,
                 ));
             }
-            Some('x') => result.push(Self::take_hex(chars, 2)?),
-            Some('u') => result.push(Self::take_hex(chars, 4)?),
-            Some('U') => result.push(Self::take_hex(chars, 8)?),
+            Some('x') => result.push(Self::take_hex(chars, 2, start, source)?),
+            Some('u') => result.push(Self::take_hex(chars, 4, start, source)?),
+            Some('U') => result.push(Self::take_hex(chars, 8, start, source)?),
             Some(c) => {
                 return Err(Error::new(
                     ErrorKind::InvalidEscape(format!("\\{c}")),
@@ -1029,6 +1031,7 @@ impl<'a> Parser<'a> {
     /// l-block-mapping(n)
     fn parse_block_mapping(&mut self, n: usize) -> Result<IndexMap<MapKey, Node>, Error> {
         let mut map = IndexMap::new();
+        let mut pending_comment: Option<String> = None;
 
         loop {
             // l-block-mapping-entry(n)
@@ -1063,6 +1066,11 @@ impl<'a> Parser<'a> {
             let mut final_node = value_node;
             final_node.inline_comment = final_node.inline_comment.or(inline);
 
+            // Attach pending comment from a previous gap
+            if let Some(c) = pending_comment.take() {
+                final_node.comment = final_node.comment.or(Some(c));
+            }
+
             let key_str = format!("{key}");
             if map.contains_key(&key) {
                 return Err(Error::new(
@@ -1087,8 +1095,8 @@ impl<'a> Parser<'a> {
                 break;
             }
 
-            // Skip gaps, collect comments
-            let _comment = self.skip_block_gaps(n);
+            // Skip gaps, collect comments for next entry
+            pending_comment = self.skip_block_gaps(n);
 
             // Check for next entry at same indent
             let spaces = self.scanner.count_spaces()?;
@@ -1099,7 +1107,6 @@ impl<'a> Parser<'a> {
                     // Not a mapping entry
                     break;
                 }
-                // TODO: attach comment to next entry
                 continue;
             }
 

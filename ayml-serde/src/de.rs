@@ -854,9 +854,17 @@ impl<R: Read> Deserializer<R> {
     }
 
     /// Stop recording and return the recorded bytes as a String.
+    ///
+    /// Returns an empty string if no recording is active (this happens during
+    /// serde `Content`-based replay for untagged enums).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the recorded bytes are not valid UTF-8 (which indicates a
+    /// parser bug).
     fn stop_recording(&mut self) -> String {
         let bytes = self.recording.take().unwrap_or_default();
-        String::from_utf8(bytes).unwrap_or_default()
+        String::from_utf8(bytes).expect("recorded bytes are not valid UTF-8")
     }
 
     /// Check if the upcoming bytes spell "null" followed by a terminator.

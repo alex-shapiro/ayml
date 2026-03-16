@@ -29,22 +29,44 @@ pub(crate) fn display_str(f: &mut fmt::Formatter<'_>, s: &str) -> fmt::Result {
 }
 
 /// Check if a string looks like it would parse as a number.
+///
+/// Display an f64 in AYML format: nan, inf, -inf, or decimal with `.0` suffix.
+pub(crate) fn display_float(f: &mut fmt::Formatter<'_>, v: f64) -> fmt::Result {
+    if v.is_nan() {
+        write!(f, "nan")
+    } else if v.is_infinite() {
+        if v.is_sign_positive() {
+            write!(f, "inf")
+        } else {
+            write!(f, "-inf")
+        }
+    } else {
+        let s = format!("{v}");
+        if s.contains('.') || s.contains('e') || s.contains('E') {
+            write!(f, "{s}")
+        } else {
+            write!(f, "{s}.0")
+        }
+    }
+}
+
+/// Matches the AYML parser's integer and float resolution: decimal integers,
+/// `0b`/`0o`/`0x` prefixed integers, and standard floats.
 pub(crate) fn looks_like_number(s: &str) -> bool {
-    let s = s
+    let unsigned = s
         .strip_prefix('+')
         .or_else(|| s.strip_prefix('-'))
         .unwrap_or(s);
-    if s.is_empty() {
-        return false;
+
+    if let Some(bin) = unsigned.strip_prefix("0b") {
+        return !bin.is_empty() && bin.chars().all(|c| c == '0' || c == '1');
     }
-    if s.starts_with("0b") || s.starts_with("0o") || s.starts_with("0x") {
-        return true;
+    if let Some(oct) = unsigned.strip_prefix("0o") {
+        return !oct.is_empty() && oct.chars().all(|c| matches!(c, '0'..='7'));
     }
-    if s.chars().all(|c| c.is_ascii_digit()) {
-        return true;
+    if let Some(hex) = unsigned.strip_prefix("0x") {
+        return !hex.is_empty() && hex.chars().all(|c| c.is_ascii_hexdigit());
     }
-    if (s.contains('.') || s.contains('e') || s.contains('E')) && s.as_bytes()[0].is_ascii_digit() {
-        return true;
-    }
-    false
+
+    s.parse::<i64>().is_ok() || s.parse::<f64>().is_ok()
 }
