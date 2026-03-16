@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-ayml-core = { path = "../ayml-core" }
 indexmap = { version = "2.13.0", features = ["serde"] }
 itoa = "1"
 ryu = "1"

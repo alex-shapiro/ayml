@@ -33,7 +33,6 @@ dependencies = [
 name = "ayml-serde"
 version = "0.1.0"
 dependencies = [
- "ayml-core",
  "indexmap",
  "itoa",
  "proptest",
