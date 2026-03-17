@@ -13,7 +13,7 @@ unintentional or malicious misuse.
 
 ## Example
 
-Yep, it look like YAML.
+It look a lot like YAML:
 
 ```ayml
 # yaml-language-server: $schema=https://hub.ashell.dev/schemas/policy/v1.json
@@ -33,8 +33,8 @@ files:
 network:
   rules:
     - host: **.crates.io # crate publishing
-    - ports:
-      - 443
+      ports:
+        - 443
 ```
 
 ## Goals
