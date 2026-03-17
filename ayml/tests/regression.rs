@@ -481,3 +481,21 @@ fn overflowing_digit_string_roundtrips() {
     let rt: ayml::Value = from_str(&s).unwrap();
     assert_eq!(v, rt);
 }
+
+#[test]
+fn non_printable_unicode_escaped_in_serializer() {
+    // Fuzz crash: U+FFFF is excluded from c-printable but the serializer
+    // emitted it as a literal character. It must be escaped as \uffff.
+    let v = ayml::Value::Str("\u{FFFF}".into());
+    let s = to_string(&v).unwrap();
+    assert!(s.contains("\\uffff"), "U+FFFF should be escaped: {s:?}");
+    let rt: ayml::Value = from_str(&s).unwrap();
+    assert_eq!(v, rt);
+
+    // U+FFFE is also excluded from c-printable
+    let v2 = ayml::Value::Str("\u{FFFE}".into());
+    let s2 = to_string(&v2).unwrap();
+    assert!(s2.contains("\\ufffe"), "U+FFFE should be escaped: {s2:?}");
+    let rt2: ayml::Value = from_str(&s2).unwrap();
+    assert_eq!(v2, rt2);
+}

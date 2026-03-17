@@ -977,7 +977,7 @@ fn write_escaped_char<W: std::io::Write>(
         '\x1B' => w.write_all(b"\\e"),
         '"' if escape_double_quote => w.write_all(b"\\\""),
         '\\' => w.write_all(b"\\\\"),
-        c if c.is_control() => {
+        c if !is_printable_for_bare(c) => {
             let cp = c as u32;
             if cp <= 0xFF {
                 write!(w, "\\x{cp:02x}")
