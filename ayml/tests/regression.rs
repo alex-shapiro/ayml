@@ -452,7 +452,10 @@ fn mapping_key_with_newline_roundtrips() {
     outer.insert("a\nb".to_string(), ayml::Value::Map(inner));
     let v = ayml::Value::Map(outer);
     let s = to_string(&v).unwrap();
-    assert!(s.starts_with("\"a\\nb\":"), "key should be double-quoted: {s}");
+    assert!(
+        s.starts_with("\"a\\nb\":"),
+        "key should be double-quoted: {s}"
+    );
     let rt: ayml::Value = from_str(&s).unwrap();
     assert_eq!(v, rt);
 }
@@ -477,7 +480,10 @@ fn overflowing_digit_string_roundtrips() {
     let digits = "8".repeat(30);
     let v = ayml::Value::Str(digits.clone());
     let s = to_string(&v).unwrap();
-    assert!(s.starts_with('"'), "overflowing digits should be quoted: {s}");
+    assert!(
+        s.starts_with('"'),
+        "overflowing digits should be quoted: {s}"
+    );
     let rt: ayml::Value = from_str(&s).unwrap();
     assert_eq!(v, rt);
 }
