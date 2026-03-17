@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::hash::{DefaultHasher, Hash, Hasher};
 
 use serde::de::{self, DeserializeOwned, Visitor};
 
@@ -1344,7 +1343,7 @@ struct MapAccess<'a, R> {
     de: &'a mut Deserializer<R>,
     style: MapStyle,
     first: bool,
-    seen_key_hashes: HashSet<u64>,
+    seen_keys: HashSet<String>,
     prescanned_first_key: Option<PrescannedKey>,
 }
 
@@ -1359,7 +1358,7 @@ impl<'a, R> MapAccess<'a, R> {
             de,
             style,
             first: true,
-            seen_key_hashes: HashSet::new(),
+            seen_keys: HashSet::new(),
             prescanned_first_key: None,
         }
     }
@@ -1373,28 +1372,13 @@ impl<'a, R> MapAccess<'a, R> {
             de,
             style,
             first: true,
-            seen_key_hashes: HashSet::new(),
+            seen_keys: HashSet::new(),
             prescanned_first_key: Some(key),
         }
     }
 }
 
 impl<R: Read> MapAccess<'_, R> {
-    /// Check for duplicate keys using hash-only comparison.
-    /// Each key is hashed and the u64 hash is stored — no key strings are
-    /// cloned. The false positive rate (rejecting a valid document due to
-    /// hash collision) is ~1 in 2^64 per key pair, which is negligible.
-    fn check_duplicate_key(&mut self, key_text: &str) -> Result<()> {
-        let mut hasher = DefaultHasher::new();
-        key_text.hash(&mut hasher);
-        let hash = hasher.finish();
-
-        if self.seen_key_hashes.insert(hash) {
-            return Ok(());
-        }
-        Err(self.de.error(&format!("duplicate key `{key_text}`")))
-    }
-
     fn validate_key(&self, key_text: &str) -> Result<()> {
         if key_text.starts_with('"') {
             return Ok(());
@@ -1444,7 +1428,9 @@ impl<'de, R: Read> de::MapAccess<'de> for MapAccess<'_, R> {
                 let key_text = self.de.stop_recording()?;
                 self.de.reading_key = false;
                 self.validate_key(&key_text)?;
-                self.check_duplicate_key(&key_text)?;
+                if !self.seen_keys.insert(key_text.clone()) {
+                    return Err(self.de.error(&format!("duplicate key `{key_text}`")));
+                }
                 self.de.skip_whitespace_and_comments()?;
                 if !self.de.eat(b':')? {
                     return Err(self.de.error("expected `:` after mapping key"));
@@ -1458,7 +1444,9 @@ impl<'de, R: Read> de::MapAccess<'de> for MapAccess<'_, R> {
                     self.first = false;
                     if let Some(key) = self.prescanned_first_key.take() {
                         self.validate_key(&key.raw)?;
-                        self.check_duplicate_key(&key.raw)?;
+                        if !self.seen_keys.insert(key.raw) {
+                            return Err(self.de.error("duplicate key"));
+                        }
                         let val = seed
                             .deserialize(de::value::StringDeserializer::<Error>::new(key.value))?;
                         return Ok(Some(val));
@@ -1492,7 +1480,9 @@ impl<'de, R: Read> de::MapAccess<'de> for MapAccess<'_, R> {
                 let key_text = self.de.stop_recording()?;
                 self.de.reading_key = false;
                 self.validate_key(&key_text)?;
-                self.check_duplicate_key(&key_text)?;
+                if !self.seen_keys.insert(key_text.clone()) {
+                    return Err(self.de.error(&format!("duplicate key `{key_text}`")));
+                }
                 self.de.skip_inline_whitespace()?;
                 if !self.de.eat(b':')? {
                     return Err(self.de.error("expected `:` after mapping key"));
