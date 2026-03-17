@@ -46,6 +46,7 @@ dependencies = [
  "ryu",
  "serde",
  "serde_bytes",
+ "serde_json",
  "thiserror",
 ]
 
