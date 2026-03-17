@@ -11,6 +11,30 @@ configuration language. Unlike YAML, it is not designed as a fully featured
 data serialization framework. Most YAML features are omitted by design to avoid
 unintentional or malicious misuse.
 
+## Example
+
+```ayml
+# yaml-language-server: $schema=https://hub.ashell.dev/schemas/policy/v1.json
+schema_version: 1
+dependencies: 
+  # default macOS permissions
+  ash/base-macos: ^0
+  # allow git command line tools
+  ash/git: ^0
+  # Ash internal team policy, hosted locally
+  ash/internal:
+    path: ~/.ash/policies/internal.ayml
+files:
+  rules:
+    # full access to everything in the current directory
+    - path: ./**
+network:
+  rules:
+    - host: **.crates.io # crate publishing
+    - ports:
+      - 443
+```
+
 ## Goals
 
 Design goals for AYML are, in decreasing priority:
