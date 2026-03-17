@@ -73,7 +73,7 @@ pub(crate) struct Deserializer<R> {
     reading_key: bool,
     pending_top_comment: Option<String>,
     depth: usize,
-    scratch: Vec<u8>,
+    scratch: String,
     recording: Option<Vec<u8>>,
     line: usize,
     line_start: usize,
@@ -87,7 +87,7 @@ impl<'a> Deserializer<SliceRead<'a>> {
             reading_key: false,
             pending_top_comment: None,
             depth: 0,
-            scratch: Vec::new(),
+            scratch: String::new(),
             recording: None,
             line: 1,
             line_start: 0,
@@ -103,7 +103,7 @@ impl<R: std::io::Read> Deserializer<IoRead<R>> {
             reading_key: false,
             pending_top_comment: None,
             depth: 0,
-            scratch: Vec::new(),
+            scratch: String::new(),
             recording: None,
             line: 1,
             line_start: 0,
@@ -465,15 +465,13 @@ impl<R: Read> Deserializer<R> {
             match self.peek()? {
                 Some(b'"') => {
                     self.next_byte()?;
-                    let s = String::from_utf8(std::mem::take(&mut self.scratch))?;
+                    let s = self.take_scratch_as_string();
                     return Ok(s);
                 }
                 Some(b'\\') => {
                     self.next_byte()?;
                     let ch = self.parse_escape()?;
-                    let mut buf = [0u8; 4];
-                    let encoded = ch.encode_utf8(&mut buf);
-                    self.scratch.extend_from_slice(encoded.as_bytes());
+                    self.scratch.push(ch);
                 }
                 Some(b'\n' | b'\r') => {
                     return Err(
@@ -488,10 +486,10 @@ impl<R: Read> Deserializer<R> {
                         );
                     }
                     self.next_byte()?;
-                    self.scratch.push(b);
-                    // If this is a multi-byte UTF-8 leading byte, read continuation bytes
                     if b >= 0x80 {
-                        self.read_utf8_continuation(b)?;
+                        self.read_utf8_char(b)?;
+                    } else {
+                        self.scratch.push(b as char);
                     }
                 }
                 None => {
@@ -501,9 +499,9 @@ impl<R: Read> Deserializer<R> {
         }
     }
 
-    /// After pushing a leading byte >= 0x80 to scratch, read and push
-    /// the expected number of continuation bytes.
-    fn read_utf8_continuation(&mut self, leading: u8) -> Result<()> {
+    /// Read a multi-byte UTF-8 character given its leading byte, validate it,
+    /// and push it to scratch. The leading byte must NOT have been pushed yet.
+    fn read_utf8_char(&mut self, leading: u8) -> Result<()> {
         let n = if leading & 0xE0 == 0xC0 {
             1
         } else if leading & 0xF0 == 0xE0 {
@@ -513,22 +511,22 @@ impl<R: Read> Deserializer<R> {
         } else {
             return Err(self.error("invalid UTF-8 byte"));
         };
-        for _ in 0..n {
+        let mut buf = [0u8; 4];
+        buf[0] = leading;
+        for i in 0..n {
             match self.next_byte()? {
                 Some(b) if b & 0xC0 == 0x80 => {
-                    self.scratch.push(b);
+                    buf[i + 1] = b;
                 }
                 _ => return Err(self.error("invalid UTF-8 continuation")),
             }
         }
-        // Validate the resulting character is printable
-        let start = self.scratch.len() - n - 1;
-        if let Ok(s) = std::str::from_utf8(&self.scratch[start..])
-            && let Some(ch) = s.chars().next()
-            && !is_printable(ch)
-        {
+        let s = std::str::from_utf8(&buf[..=n])?;
+        let ch = s.chars().next().unwrap();
+        if !is_printable(ch) {
             return Err(self.error(&format!("non-printable character U+{:04X}", ch as u32)));
         }
+        self.scratch.push(ch);
         Ok(())
     }
 
@@ -677,6 +675,12 @@ impl<R: Read> Deserializer<R> {
         })
     }
 
+    /// Take the scratch buffer as a String.
+    #[inline]
+    fn take_scratch_as_string(&mut self) -> String {
+        std::mem::take(&mut self.scratch)
+    }
+
     /// Scan a bare (unquoted) scalar string.
     fn scan_bare_string(&mut self, ctx: Context) -> Result<String> {
         self.scratch.clear();
@@ -688,7 +692,7 @@ impl<R: Read> Deserializer<R> {
                 match next {
                     Some(b) if !is_ascii_whitespace(b) && is_printable_byte_start(b) => {
                         let b0 = self.next_byte()?.unwrap();
-                        self.scratch.push(b0);
+                        self.scratch.push(b0 as char);
                     }
                     _ => {
                         return Err(self.error("unexpected character"));
@@ -697,9 +701,10 @@ impl<R: Read> Deserializer<R> {
             }
             Some(b) if is_plain_first_byte(b) => {
                 self.next_byte()?;
-                self.scratch.push(b);
                 if b >= 0x80 {
-                    self.read_utf8_continuation(b)?;
+                    self.read_utf8_char(b)?;
+                } else {
+                    self.scratch.push(b as char);
                 }
             }
             Some(b) => {
@@ -719,12 +724,12 @@ impl<R: Read> Deserializer<R> {
             // Accumulate inline whitespace into scratch
             while let Some(b' ' | b'\t') = self.peek()? {
                 let b = self.next_byte()?.unwrap();
-                self.scratch.push(b);
+                self.scratch.push(b as char);
             }
 
             if self.is_break_or_eof()? {
                 self.scratch.truncate(ws_mark);
-                let s = String::from_utf8(std::mem::take(&mut self.scratch))?;
+                let s = self.take_scratch_as_string();
                 return Ok(s);
             }
 
@@ -732,7 +737,7 @@ impl<R: Read> Deserializer<R> {
                 Some(b'#') => {
                     // '#' terminates bare strings; drop trailing ws
                     self.scratch.truncate(ws_mark);
-                    let s = String::from_utf8(std::mem::take(&mut self.scratch))?;
+                    let s = self.take_scratch_as_string();
                     return Ok(s);
                 }
                 Some(b':') => {
@@ -745,15 +750,15 @@ impl<R: Read> Deserializer<R> {
                     {
                         // Mapping value indicator — drop trailing ws
                         self.scratch.truncate(ws_mark);
-                        let s = String::from_utf8(std::mem::take(&mut self.scratch))?;
+                        let s = self.take_scratch_as_string();
                         return Ok(s);
                     }
                     self.next_byte()?;
-                    self.scratch.push(b':');
+                    self.scratch.push(':');
                 }
                 Some(b',' | b']' | b'}') if ctx == Context::Flow => {
                     self.scratch.truncate(ws_mark);
-                    let s = String::from_utf8(std::mem::take(&mut self.scratch))?;
+                    let s = self.take_scratch_as_string();
                     return Ok(s);
                 }
                 Some(b) if b < 0x20 && b != b'\t' => {
@@ -763,14 +768,15 @@ impl<R: Read> Deserializer<R> {
                 }
                 Some(b) => {
                     self.next_byte()?;
-                    self.scratch.push(b);
                     if b >= 0x80 {
-                        self.read_utf8_continuation(b)?;
+                        self.read_utf8_char(b)?;
+                    } else {
+                        self.scratch.push(b as char);
                     }
                 }
                 None => {
                     self.scratch.truncate(ws_mark);
-                    let s = String::from_utf8(std::mem::take(&mut self.scratch))?;
+                    let s = self.take_scratch_as_string();
                     return Ok(s);
                 }
             }

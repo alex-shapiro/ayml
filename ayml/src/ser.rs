@@ -885,6 +885,12 @@ fn needs_quoting(s: &str) -> bool {
 
     let bytes = s.as_bytes();
     let first = bytes[0];
+    let last = bytes[bytes.len() - 1];
+
+    // Leading whitespace
+    if first == b' ' || first == b'\t' {
+        return true;
+    }
 
     // `-` and `:` are only valid bare-string starters when followed by ns-char
     if (first == b'-' || first == b':')
@@ -893,49 +899,46 @@ fn needs_quoting(s: &str) -> bool {
         return true;
     }
 
-    // Looks like a number
-    if looks_like_number(s) {
+    // Trailing `:` would be parsed as a mapping value indicator
+    if last == b':' || last == b' ' || last == b'\t' {
         return true;
     }
 
-    // Contains characters that would break bare string parsing
-    for (i, &b) in bytes.iter().enumerate() {
+    // Only check looks_like_number for strings that could plausibly be numbers
+    if (first.is_ascii_digit() || first == b'+' || first == b'-') && looks_like_number(s) {
+        return true;
+    }
+
+    // Single pass: check for characters that break bare string parsing.
+    // ASCII bytes are fully checked here; multi-byte sequences (>= 0x80)
+    // are checked against c-printable via a char decode.
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
         match b {
-            // Control characters or characters needing escaping
-            0x00..=0x08 | 0x0B | 0x0C | 0x0E..=0x1F | 0x7F | b'"' | b'\\' => {
-                return true;
-            }
-            // Flow indicators and '#' anywhere would break parsing
-            b',' | b'[' | b']' | b'{' | b'}' | b'#' => return true,
-            // `: ` or `:\t` mid-string would be parsed as mapping indicator
+            // ASCII control characters, characters needing escaping,
+            // flow indicators, and '#'
+            // (0x09=tab is allowed, 0x0A=LF triggers triple-quoting in serialize_str)
+            0x00..=0x08 | 0x0B..=0x1F | 0x7F | b'"' | b'\\' | b',' | b'[' | b']' | b'{' | b'}'
+            | b'#' => return true,
+            // `: ` or `:\t` mid-string
             b':' if i + 1 < bytes.len() && (bytes[i + 1] == b' ' || bytes[i + 1] == b'\t') => {
                 return true;
             }
+            // Multi-byte UTF-8: decode and check c-printable
+            0x80.. => {
+                // SAFETY: s is a valid &str so this is valid UTF-8.
+                // Find the char at this byte offset and check it.
+                let ch = s[i..].chars().next().unwrap();
+                if !is_printable_for_bare(ch) {
+                    return true;
+                }
+                i += ch.len_utf8();
+                continue;
+            }
             _ => {}
         }
-    }
-
-    // Check for non-printable characters outside ASCII (C1 control block,
-    // surrogates, etc.) by iterating chars.
-    for ch in s.chars() {
-        if !is_printable_for_bare(ch) {
-            return true;
-        }
-    }
-
-    // Trailing `:` would be parsed as a mapping key
-    if bytes.last() == Some(&b':') {
-        return true;
-    }
-
-    // Trailing whitespace would be stripped
-    if bytes.last().is_some_and(|&b| b == b' ' || b == b'\t') {
-        return true;
-    }
-
-    // Leading whitespace
-    if first == b' ' || first == b'\t' {
-        return true;
+        i += 1;
     }
 
     false
