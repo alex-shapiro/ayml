@@ -39,13 +39,13 @@ network:
 
 ## Goals
 
-Design goals for AYML are, in decreasing priority:
+AYML's design goals are, in decreasing priority:
 
-1. AYML is easy to understand
-2. AYML is easy to author correctly
-3. AYML is easy to deserialize into strongly typed data structures
-4. AYML is expressible in the core types of dynamically typed languages
-5. AYML incorporates comments as a formal part of the document structure
+1. it is easy to read and understand
+2. it is easy to write correctly (and hard to write incorrectly)
+3. it deserializes naturally into strongly typed data structures
+4. it deserializes naturally into the core types of dynamically typed languages
+5. it incorporates comments as a formal part of the document structure
 
 ## Omitted
 
