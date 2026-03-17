@@ -465,8 +465,7 @@ impl<R: Read> Deserializer<R> {
             match self.peek()? {
                 Some(b'"') => {
                     self.next_byte()?;
-                    let s = self.take_scratch_as_string();
-                    return Ok(s);
+                    return Ok(std::mem::take(&mut self.scratch));
                 }
                 Some(b'\\') => {
                     self.next_byte()?;
@@ -675,12 +674,6 @@ impl<R: Read> Deserializer<R> {
         })
     }
 
-    /// Take the scratch buffer as a String.
-    #[inline]
-    fn take_scratch_as_string(&mut self) -> String {
-        std::mem::take(&mut self.scratch)
-    }
-
     /// Scan a bare (unquoted) scalar string.
     fn scan_bare_string(&mut self, ctx: Context) -> Result<String> {
         self.scratch.clear();
@@ -729,16 +722,14 @@ impl<R: Read> Deserializer<R> {
 
             if self.is_break_or_eof()? {
                 self.scratch.truncate(ws_mark);
-                let s = self.take_scratch_as_string();
-                return Ok(s);
+                return Ok(std::mem::take(&mut self.scratch));
             }
 
             match self.peek()? {
                 Some(b'#') => {
                     // '#' terminates bare strings; drop trailing ws
                     self.scratch.truncate(ws_mark);
-                    let s = self.take_scratch_as_string();
-                    return Ok(s);
+                    return Ok(std::mem::take(&mut self.scratch));
                 }
                 Some(b':') => {
                     let next = self.peek_at(1)?;
@@ -750,16 +741,14 @@ impl<R: Read> Deserializer<R> {
                     {
                         // Mapping value indicator — drop trailing ws
                         self.scratch.truncate(ws_mark);
-                        let s = self.take_scratch_as_string();
-                        return Ok(s);
+                        return Ok(std::mem::take(&mut self.scratch));
                     }
                     self.next_byte()?;
                     self.scratch.push(':');
                 }
                 Some(b',' | b']' | b'}') if ctx == Context::Flow => {
                     self.scratch.truncate(ws_mark);
-                    let s = self.take_scratch_as_string();
-                    return Ok(s);
+                    return Ok(std::mem::take(&mut self.scratch));
                 }
                 Some(b) if b < 0x20 && b != b'\t' => {
                     return Err(
@@ -776,8 +765,7 @@ impl<R: Read> Deserializer<R> {
                 }
                 None => {
                     self.scratch.truncate(ws_mark);
-                    let s = self.take_scratch_as_string();
-                    return Ok(s);
+                    return Ok(std::mem::take(&mut self.scratch));
                 }
             }
         }
