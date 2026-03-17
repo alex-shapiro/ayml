@@ -458,6 +458,19 @@ fn mapping_key_with_newline_roundtrips() {
 }
 
 #[test]
+fn bare_numeric_prefix_strings_roundtrip() {
+    // Bare prefixes like "0b" are not valid integers (no digits after prefix).
+    // The deserializer correctly treats them as strings, so the serializer
+    // does not need to quote them.
+    for s in ["0b", "0o", "0x", "+0b", "-0x"] {
+        let v = ayml::Value::Str(s.into());
+        let ser = to_string(&v).unwrap();
+        let rt: ayml::Value = from_str(&ser).unwrap();
+        assert_eq!(v, rt);
+    }
+}
+
+#[test]
 fn overflowing_digit_string_roundtrips() {
     // Fuzz crash: "888...888" (30 digits) exceeds i64 range. The serializer
     // must quote it so it roundtrips as a string, not fail as integer overflow.

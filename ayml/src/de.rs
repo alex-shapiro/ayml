@@ -1780,19 +1780,25 @@ fn try_parse_int(s: &str) -> std::result::Result<Option<i64>, ()> {
     let abs = if let Some(bin) = unsigned.strip_prefix("0b") {
         match u64::from_str_radix(bin, 2) {
             Ok(v) => v,
-            Err(_) if bin.chars().all(|c| c == '0' || c == '1') => return Err(()),
+            Err(_) if !bin.is_empty() && bin.chars().all(|c| c == '0' || c == '1') => {
+                return Err(());
+            }
             Err(_) => return Ok(None),
         }
     } else if let Some(oct) = unsigned.strip_prefix("0o") {
         match u64::from_str_radix(oct, 8) {
             Ok(v) => v,
-            Err(_) if oct.chars().all(|c| c.is_ascii_digit() && c < '8') => return Err(()),
+            Err(_) if !oct.is_empty() && oct.chars().all(|c| c.is_ascii_digit() && c < '8') => {
+                return Err(());
+            }
             Err(_) => return Ok(None),
         }
     } else if let Some(hex) = unsigned.strip_prefix("0x") {
         match u64::from_str_radix(hex, 16) {
             Ok(v) => v,
-            Err(_) if hex.chars().all(|c| c.is_ascii_hexdigit()) => return Err(()),
+            Err(_) if !hex.is_empty() && hex.chars().all(|c| c.is_ascii_hexdigit()) => {
+                return Err(());
+            }
             Err(_) => return Ok(None),
         }
     } else {
