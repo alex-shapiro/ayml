@@ -21,6 +21,9 @@ files:
     - read
   - path: /opt/X11/bin
     action: deny
+  - path: /opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/__pycache__/heapq.cpython-314.pyc.4393384960
+    operations:
+    - create
   - path: ~/.zprofile
     action: deny
     operations:
@@ -40,9 +43,11 @@ exec:
   rules:
   - path: ./ayml/fuzz/target/**
   - path: ./target/**
-  - path: /opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python
-  - path: /opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/bin/python3.14
+  - path: /opt/homebrew/Cellar/llvm@20/**
+  - path: /opt/homebrew/Cellar/python@3.14/**
   - path: /opt/homebrew/Cellar/tree/*/bin/tree
   - path: ~/.cargo/bin/cargo-fuzz
+  - path: ~/.cargo/bin/samply
+    subcommand: record
 io_devices:
   rules: []
