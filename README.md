@@ -13,6 +13,8 @@ unintentional or malicious misuse.
 
 ## Example
 
+Yep, it look like YAML.
+
 ```ayml
 # yaml-language-server: $schema=https://hub.ashell.dev/schemas/policy/v1.json
 schema_version: 1
