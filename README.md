@@ -73,19 +73,13 @@ cargo +nightly fuzz run fuzz_deserialize fuzz/artifacts/fuzz_deserialize/crash-<
 
 All tests performed on a M4 Max Macbook Pro.
 
-┌─────────────┬───────────┐
-│  Benchmark  │ Value     │
-├─────────────┼───────────┤
-│ flat        │ 352 MiB/s │
-├─────────────┼───────────┤
-│ nested      │ 425 MiB/s │
-├─────────────┼───────────┤
-│ seq_of_maps │ 468 MiB/s │
-├─────────────┼───────────┤
-│ strings     │ 620 MiB/s │
-├─────────────┼───────────┤
-│ large_50    │ 553 MiB/s │
-└─────────────┴───────────┘
+|  Benchmark  | Value     |
+|-------------|-----------|
+| flat        | 352 MiB/s |
+| nested      | 425 MiB/s |
+| seq_of_maps | 468 MiB/s |
+| strings     | 620 MiB/s |
+| large_50    | 553 MiB/s |
 
 ## Acknowledgements
 
