@@ -408,3 +408,94 @@ fn looks_like_number_trailing_dot_not_ayml_float() {
         "\"5.\" is not an AYML float and should not be quoted, got: {display}"
     );
 }
+
+#[test]
+fn bare_dash_string_roundtrips() {
+    // Fuzz crash: input "-#V@" parses as Str("-") because # starts a comment.
+    // The serializer must quote "-" since a bare `-` requires a following ns-char.
+    let v: ayml::Value = from_str("-#V@").unwrap();
+    assert_eq!(v, ayml::Value::Str("-".into()));
+    let s = to_string(&v).unwrap();
+    assert_eq!(s, "\"-\"\n");
+    let rt: ayml::Value = from_str(&s).unwrap();
+    assert_eq!(v, rt);
+}
+
+#[test]
+fn bare_colon_string_roundtrips() {
+    // Same class of bug: a bare `:` also requires a following ns-char.
+    let s = to_string(&ayml::Value::Str(":".into())).unwrap();
+    assert_eq!(s, "\":\"\n");
+    let rt: ayml::Value = from_str(&s).unwrap();
+    assert_eq!(rt, ayml::Value::Str(":".into()));
+}
+
+#[test]
+fn colon_tab_mid_string_quoted() {
+    // `:\t` mid-string would be parsed as a mapping value indicator.
+    let v = ayml::Value::Str("foo:\tbar".into());
+    let s = to_string(&v).unwrap();
+    assert!(s.starts_with('"'), "should be quoted: {s}");
+    let rt: ayml::Value = from_str(&s).unwrap();
+    assert_eq!(v, rt);
+}
+
+#[test]
+fn mapping_key_with_newline_roundtrips() {
+    // Fuzz crash: a mapping key containing \n was triple-quoted by the serializer,
+    // but triple-quoted strings span multiple lines and can't be mapping keys.
+    // The serializer must use single-line double-quoting for keys with \n.
+    use indexmap::IndexMap;
+    let mut inner = IndexMap::new();
+    inner.insert("v".to_string(), ayml::Value::Int(1));
+    let mut outer = IndexMap::new();
+    outer.insert("a\nb".to_string(), ayml::Value::Map(inner));
+    let v = ayml::Value::Map(outer);
+    let s = to_string(&v).unwrap();
+    assert!(s.starts_with("\"a\\nb\":"), "key should be double-quoted: {s}");
+    let rt: ayml::Value = from_str(&s).unwrap();
+    assert_eq!(v, rt);
+}
+
+#[test]
+fn bare_numeric_prefix_strings_roundtrip() {
+    // Bare prefixes like "0b" are not valid integers (no digits after prefix).
+    // The deserializer correctly treats them as strings, so the serializer
+    // does not need to quote them.
+    for s in ["0b", "0o", "0x", "+0b", "-0x"] {
+        let v = ayml::Value::Str(s.into());
+        let ser = to_string(&v).unwrap();
+        let rt: ayml::Value = from_str(&ser).unwrap();
+        assert_eq!(v, rt);
+    }
+}
+
+#[test]
+fn overflowing_digit_string_roundtrips() {
+    // Fuzz crash: "888...888" (30 digits) exceeds i64 range. The serializer
+    // must quote it so it roundtrips as a string, not fail as integer overflow.
+    let digits = "8".repeat(30);
+    let v = ayml::Value::Str(digits.clone());
+    let s = to_string(&v).unwrap();
+    assert!(s.starts_with('"'), "overflowing digits should be quoted: {s}");
+    let rt: ayml::Value = from_str(&s).unwrap();
+    assert_eq!(v, rt);
+}
+
+#[test]
+fn non_printable_unicode_escaped_in_serializer() {
+    // Fuzz crash: U+FFFF is excluded from c-printable but the serializer
+    // emitted it as a literal character. It must be escaped as \uffff.
+    let v = ayml::Value::Str("\u{FFFF}".into());
+    let s = to_string(&v).unwrap();
+    assert!(s.contains("\\uffff"), "U+FFFF should be escaped: {s:?}");
+    let rt: ayml::Value = from_str(&s).unwrap();
+    assert_eq!(v, rt);
+
+    // U+FFFE is also excluded from c-printable
+    let v2 = ayml::Value::Str("\u{FFFE}".into());
+    let s2 = to_string(&v2).unwrap();
+    assert!(s2.contains("\\ufffe"), "U+FFFE should be escaped: {s2:?}");
+    let rt2: ayml::Value = from_str(&s2).unwrap();
+    assert_eq!(v2, rt2);
+}

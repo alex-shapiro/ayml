@@ -255,10 +255,10 @@ impl<'a, W: std::io::Write> ser::Serializer for &'a mut Serializer<W> {
         if v.is_empty() {
             return self.write_str(r#""""#);
         }
-        if v.contains('\n') {
+        if v.contains('\n') && !self.serializing_key {
             return self.write_triple_quoted(v);
         }
-        if needs_quoting(v) {
+        if v.contains('\n') || needs_quoting(v) {
             write_quoted(&mut self.writer, v).map_err(Error::from)
         } else {
             self.write_str(v)
@@ -436,6 +436,8 @@ impl<W: std::io::Write> ser::SerializeSeq for SeqState<'_, W> {
             if self.ser.after_key {
                 self.ser.write_str("\n")?;
                 self.ser.after_key = false;
+                self.ser.indent += 2;
+                self.bumped = true;
             }
             if self.ser.compact {
                 self.ser.compact = false;
@@ -884,8 +886,10 @@ fn needs_quoting(s: &str) -> bool {
     let bytes = s.as_bytes();
     let first = bytes[0];
 
-    // Starts with `- ` or `: ` (would be parsed as indicator)
-    if bytes.len() >= 2 && (first == b'-' || first == b':') && bytes[1] == b' ' {
+    // `-` and `:` are only valid bare-string starters when followed by ns-char
+    if (first == b'-' || first == b':')
+        && (bytes.len() < 2 || bytes[1] == b' ' || bytes[1] == b'\t')
+    {
         return true;
     }
 
@@ -903,8 +907,10 @@ fn needs_quoting(s: &str) -> bool {
             }
             // Flow indicators and '#' anywhere would break parsing
             b',' | b'[' | b']' | b'{' | b'}' | b'#' => return true,
-            // `: ` mid-string would be parsed as mapping indicator
-            b':' if i + 1 < bytes.len() && bytes[i + 1] == b' ' => return true,
+            // `: ` or `:\t` mid-string would be parsed as mapping indicator
+            b':' if i + 1 < bytes.len() && (bytes[i + 1] == b' ' || bytes[i + 1] == b'\t') => {
+                return true;
+            }
             _ => {}
         }
     }
@@ -971,7 +977,7 @@ fn write_escaped_char<W: std::io::Write>(
         '\x1B' => w.write_all(b"\\e"),
         '"' if escape_double_quote => w.write_all(b"\\\""),
         '\\' => w.write_all(b"\\\\"),
-        c if c.is_control() => {
+        c if !is_printable_for_bare(c) => {
             let cp = c as u32;
             if cp <= 0xFF {
                 write!(w, "\\x{cp:02x}")
@@ -1248,7 +1254,7 @@ mod tests {
         let c = Config {
             items: vec!["alpha".into(), "beta".into()],
         };
-        assert_eq!(to_string(&c).unwrap(), "items:\n- alpha\n- beta\n");
+        assert_eq!(to_string(&c).unwrap(), "items:\n  - alpha\n  - beta\n");
     }
 
     #[test]
@@ -1357,8 +1363,8 @@ debug: true
 inner:
   host: localhost
 ports:
-- 8080
-- 9090
+  - 8080
+  - 9090
 ";
         assert_eq!(to_string(&c).unwrap(), expected);
     }
@@ -1437,7 +1443,7 @@ ports:
         }
         assert_eq!(
             to_string(&Cmd::Move(10, 20)).unwrap(),
-            "Move:\n- 10\n- 20\n"
+            "Move:\n  - 10\n  - 20\n"
         );
     }
 

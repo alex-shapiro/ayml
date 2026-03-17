@@ -447,17 +447,17 @@ schema_version: 1
 network:
   # Network access rules
   rules:
-    # Allow GitHub
-  - host: *.github.com # primary domain
-    direction: outbound
-    ports:
-    - 443
-    - 22
-    # Deny all other traffic
-  - host: \"0.0.0.0/0\"
-    action: deny
-    ports: all
-    precedence: -1
+        # Allow GitHub
+    - host: *.github.com # primary domain
+      direction: outbound
+      ports:
+        - 443
+        - 22
+        # Deny all other traffic
+    - host: 0.0.0.0/0
+      action: deny
+      ports: all
+      precedence: -1
 ";
     let parsed: Policy = ayml::from_str(hand_written).expect("parse hand-written");
 

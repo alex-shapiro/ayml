@@ -71,8 +71,9 @@ pub(crate) fn looks_like_number(s: &str) -> bool {
         return !hex.is_empty() && hex.chars().all(|c| c.is_ascii_hexdigit());
     }
 
-    // Check decimal integer: optional sign followed by digits only
-    if s.parse::<i64>().is_ok() {
+    // Check decimal integer: optional sign followed by digits only.
+    // We check the pattern (not i64::parse) so overflowing integers are still quoted.
+    if !unsigned.is_empty() && unsigned.bytes().all(|b| b.is_ascii_digit()) {
         return true;
     }
 

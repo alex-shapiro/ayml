@@ -69,13 +69,13 @@ rbi: 147   # Runs Batted In
 
 ```
 american:
-- Boston Red Sox
-- Detroit Tigers
-- New York Yankees
+  - Boston Red Sox
+  - Detroit Tigers
+  - New York Yankees
 national:
-- New York Mets
-- Chicago Cubs
-- Atlanta Braves
+  - New York Mets
+  - Chicago Cubs
+  - Atlanta Braves
 ```
 
 
@@ -116,12 +116,12 @@ Sammy Sosa: {
 
 ```
 hr: # 1998 hr ranking
-- Mark McGwire
-- Sammy Sosa
+  - Mark McGwire
+  - Sammy Sosa
 # 1998 rbi ranking
 rbi:
-- Sammy Sosa
-- Ken Griffey
+  - Sammy Sosa
+  - Ken Griffey
 ```
 
 **Example: Compact Nested Mapping**
@@ -236,8 +236,8 @@ network:
   rules:
     - host: github.com
       ports:
-      - 22 # Git (SSH)
-      - 443 # Site
+        - 22 # Git (SSH)
+        - 443 # Site
 ```
 
 A comment must not appear inside a scalar. Inside triple-quoted strings (`"""`),
@@ -281,14 +281,14 @@ bill-to:
     postal  : 48046
 ship-to: null
 product:
-- sku         : BL394D
-  quantity    : 4
-  description : Basketball
-  price       : 450.00
-- sku         : BL4438H
-  quantity    : 1
-  description : Super Hoop
-  price       : 2392.00
+  - sku         : BL394D
+    quantity    : 4
+    description : Basketball
+    price       : 450.00
+  - sku         : BL4438H
+    quantity    : 1
+    description : Super Hoop
+    price       : 2392.00
 tax  : 251.42
 total: 4443.42
 comments: """
@@ -305,16 +305,16 @@ Date: 2001-11-23T15:03:17-5:00
 User: ed
 Fatal: Unknown variable "bar"
 Stack:
-- file: TopClass.py
-  line: 23
-  code: """
-    x = MoreObject("345\n")
-    """
-- file: MoreClass.py
-  line: 58
-  code: """
-    foo = bar
-    """
+  - file: TopClass.py
+    line: 23
+    code: """
+      x = MoreObject("345\n")
+      """
+  - file: MoreClass.py
+    line: 58
+    code: """
+      foo = bar
+      """
 ```
 
 ## BNF Grammar
@@ -499,13 +499,13 @@ ns-char ::= nb-char - s-white
 
 ## Miscellaneous Characters
 
-A decimal digit for numbers:
+A decimal digit is used for numbers:
 
 ```
 ns-dec-digit ::= [x30-x39]             # 0-9
 ```
 
-A hexadecimal digit for escape sequences:
+A hexadecimal digit is used for escape sequences:
 
 ```
 ns-hex-digit ::=
@@ -1042,10 +1042,10 @@ l-block-gap(n) ::=
 A block sequence is a series of entries, each indicated by a `- ` (dash
 followed by a space). Each entry begins at the same indentation level.
 
-The `- ` indicator provides implicit indentation — the content after `- `
-is at indentation `n+2` (the dash plus the space). This means a block
-sequence can appear as a mapping value at the same indentation level as
-the mapping key, because the `- ` itself provides the required nesting.
+A block sequence entry indicator `- ` may provide implicit indentation for
+the entry. An AYML deserializer MUST accept a block sequence entry with
+regular or implicit indentation. An AYML serializer MUST produce a block
+sequence entry with regular indentation.
 
 The entry value MUST begin on the same line as `- `. A `- ` followed by
 only whitespace and a line break is a parse error (there are no empty nodes
@@ -1107,13 +1107,13 @@ A block mapping is a series of key/value pairs.
 A mapping MUST NOT have duplicate keys (this is a semantic constraint enforced
 by the parser, not expressible in the grammar).
 
-A mapping key is a bool, integer, or string scalar. Float and null keys are
-not allowed.
+A mapping key is a single-line scalar: a bool, integer, or string.
+Float and null keys are not allowed. Triple-quoted strings are not
+allowed as mapping keys because they span multiple lines.
 
 ```
 ns-mapping-key(c) ::=
     c-double-quoted
-  | c-triple-quoted
   | ns-bool
   | ns-integer
   | ns-bare-string(c)
@@ -1122,10 +1122,10 @@ ns-mapping-key(c) ::=
 A mapping key MUST NOT resolve to null or float. To use the string `"null"` as
 a key, quote it.
 
-A mapping entry. The value may appear on the same line or on subsequent
-lines. When the value is on subsequent lines, the indentation level `m` is
-auto-detected. For sequences, `m >= n` (because `- ` provides implicit
-nesting). For other values, `m > n`.
+A mapping entry value may appear on the same line as its key, or on the next line.
+If the value is on the next line, its indentation level `m` is auto-detected and
+MUST satisfy `m > n`, except for sequences where `m >= n` is permitted due to
+implicit indentation.
 
 ```
 l-block-mapping-entry(n) ::=

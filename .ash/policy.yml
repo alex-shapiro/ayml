@@ -40,6 +40,8 @@ exec:
   rules:
   - path: ./ayml/fuzz/target/**
   - path: ./target/**
+  - path: /opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python
+  - path: /opt/homebrew/Cellar/python@3.14/3.14.3_1/Frameworks/Python.framework/Versions/3.14/bin/python3.14
   - path: /opt/homebrew/Cellar/tree/*/bin/tree
   - path: ~/.cargo/bin/cargo-fuzz
 io_devices:
