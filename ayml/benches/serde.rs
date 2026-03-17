@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 
 // ── Workloads ───────────────────────────────────────────────────────
 
-/// Small flat config (~100 bytes)
 const FLAT_AYML: &str = "\
 host: localhost
 port: 8080
@@ -23,7 +22,6 @@ struct FlatConfig {
     version: String,
 }
 
-/// Nested structs (~200 bytes)
 const NESTED_AYML: &str = "\
 server:
   host: localhost
@@ -65,7 +63,6 @@ struct Logging {
     file: String,
 }
 
-/// Sequence of mappings (~300 bytes)
 const SEQ_OF_MAPS_AYML: &str = "\
 - name: Alice
   age: 30
@@ -93,7 +90,6 @@ struct Person {
     active: bool,
 }
 
-/// String-heavy document (~400 bytes)
 const STRINGS_AYML: &str = "\
 title: \"The Quick Brown Fox Jumps Over the Lazy Dog\"
 description: \"A pangram is a sentence using every letter of the alphabet at least once.\"
@@ -118,7 +114,6 @@ struct Article {
     url: String,
 }
 
-/// Large-ish document: 50 entries (~2.5 KB)
 fn make_large_ayml() -> String {
     let mut s = String::new();
     for i in 0..50 {
@@ -143,54 +138,27 @@ struct Entry {
 
 // ── Benchmarks ──────────────────────────────────────────────────────
 
+macro_rules! bench_de {
+    ($group:expr, $name:expr, $input:expr, $type:ty) => {
+        $group.throughput(Throughput::Bytes($input.len() as u64));
+        $group.bench_with_input(BenchmarkId::new("typed", $name), $input, |b, s| {
+            b.iter(|| ayml::from_str::<$type>(s).unwrap());
+        });
+        $group.bench_with_input(BenchmarkId::new("value", $name), $input, |b, s| {
+            b.iter(|| ayml::from_str::<ayml::Value>(s).unwrap());
+        });
+    };
+}
+
 fn bench_deserialize(c: &mut Criterion) {
     let large_ayml = make_large_ayml();
-
     let mut group = c.benchmark_group("deserialize");
 
-    let cases: &[(&str, &str)] = &[
-        ("flat", FLAT_AYML),
-        ("nested", NESTED_AYML),
-        ("seq_of_maps", SEQ_OF_MAPS_AYML),
-        ("strings", STRINGS_AYML),
-        ("large_50", &large_ayml),
-    ];
-
-    for (name, input) in cases {
-        group.throughput(Throughput::Bytes(input.len() as u64));
-        match *name {
-            "flat" => {
-                group.bench_with_input(BenchmarkId::new("typed", name), input, |b, input| {
-                    b.iter(|| ayml::from_str::<FlatConfig>(input).unwrap());
-                });
-            }
-            "nested" => {
-                group.bench_with_input(BenchmarkId::new("typed", name), input, |b, input| {
-                    b.iter(|| ayml::from_str::<NestedConfig>(input).unwrap());
-                });
-            }
-            "seq_of_maps" => {
-                group.bench_with_input(BenchmarkId::new("typed", name), input, |b, input| {
-                    b.iter(|| ayml::from_str::<Vec<Person>>(input).unwrap());
-                });
-            }
-            "strings" => {
-                group.bench_with_input(BenchmarkId::new("typed", name), input, |b, input| {
-                    b.iter(|| ayml::from_str::<Article>(input).unwrap());
-                });
-            }
-            "large_50" => {
-                group.bench_with_input(BenchmarkId::new("typed", name), input, |b, input| {
-                    b.iter(|| ayml::from_str::<Vec<Entry>>(input).unwrap());
-                });
-            }
-            _ => unreachable!(),
-        }
-        // Also bench untyped (Value) deserialization
-        group.bench_with_input(BenchmarkId::new("value", name), input, |b, input| {
-            b.iter(|| ayml::from_str::<ayml::Value>(input).unwrap());
-        });
-    }
+    bench_de!(group, "flat", FLAT_AYML, FlatConfig);
+    bench_de!(group, "nested", NESTED_AYML, NestedConfig);
+    bench_de!(group, "seq_of_maps", SEQ_OF_MAPS_AYML, Vec<Person>);
+    bench_de!(group, "strings", STRINGS_AYML, Article);
+    bench_de!(group, "large_50", &large_ayml, Vec<Entry>);
 
     group.finish();
 }
@@ -205,37 +173,21 @@ fn bench_serialize(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("serialize");
 
-    // Measure throughput based on serialized output size
-    let flat_size = ayml::to_string(&flat).unwrap().len();
-    let nested_size = ayml::to_string(&nested).unwrap().len();
-    let seq_size = ayml::to_string(&seq_of_maps).unwrap().len();
-    let strings_size = ayml::to_string(&strings).unwrap().len();
-    let large_size = ayml::to_string(&large).unwrap().len();
+    macro_rules! bench_ser {
+        ($name:expr, $value:expr) => {
+            let size = ayml::to_string(&$value).unwrap().len();
+            group.throughput(Throughput::Bytes(size as u64));
+            group.bench_function($name, |b| {
+                b.iter(|| ayml::to_string(&$value).unwrap());
+            });
+        };
+    }
 
-    group.throughput(Throughput::Bytes(flat_size as u64));
-    group.bench_function("flat", |b| {
-        b.iter(|| ayml::to_string(&flat).unwrap());
-    });
-
-    group.throughput(Throughput::Bytes(nested_size as u64));
-    group.bench_function("nested", |b| {
-        b.iter(|| ayml::to_string(&nested).unwrap());
-    });
-
-    group.throughput(Throughput::Bytes(seq_size as u64));
-    group.bench_function("seq_of_maps", |b| {
-        b.iter(|| ayml::to_string(&seq_of_maps).unwrap());
-    });
-
-    group.throughput(Throughput::Bytes(strings_size as u64));
-    group.bench_function("strings", |b| {
-        b.iter(|| ayml::to_string(&strings).unwrap());
-    });
-
-    group.throughput(Throughput::Bytes(large_size as u64));
-    group.bench_function("large_50", |b| {
-        b.iter(|| ayml::to_string(&large).unwrap());
-    });
+    bench_ser!("flat", flat);
+    bench_ser!("nested", nested);
+    bench_ser!("seq_of_maps", seq_of_maps);
+    bench_ser!("strings", strings);
+    bench_ser!("large_50", large);
 
     group.finish();
 }

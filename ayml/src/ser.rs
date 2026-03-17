@@ -873,69 +873,91 @@ fn capture_option_string<T: ?Sized + Serialize>(value: &T) -> Option<String> {
 
 /// Returns true if the string must be double-quoted in AYML output.
 fn needs_quoting(s: &str) -> bool {
-    if s.is_empty() {
+    let bytes = s.as_bytes();
+    if bytes.is_empty() {
         return true;
     }
 
-    // Reserved scalar values
-    match s {
-        "null" | "true" | "false" | "inf" | "+inf" | "-inf" | "nan" => return true,
+    let first = bytes[0];
+    let last = bytes[bytes.len() - 1];
+
+    // Trailing `:`, space, or tab always needs quoting
+    if last == b':' || last == b' ' || last == b'\t' {
+        return true;
+    }
+
+    // Dispatch on first byte: handle reserved words, indicators, numbers,
+    // and leading whitespace without redundant branching.
+    match first {
+        // Leading whitespace, control characters, indicators that are never valid bare starters
+        b' ' | b'\t' | 0x00..=0x08 | 0x0B..=0x1F | 0x7F | b'"' | b'\\' | b',' | b'[' | b']'
+        | b'{' | b'}' | b'#' => return true,
+        // `-` and `:` require a following ns-char; also check for numbers/reserved words
+        b'-' => {
+            if bytes.len() < 2 || bytes[1] == b' ' || bytes[1] == b'\t' {
+                return true;
+            }
+            if s == "-inf" || looks_like_number(s) {
+                return true;
+            }
+        }
+        b':' => {
+            if bytes.len() < 2 || bytes[1] == b' ' || bytes[1] == b'\t' {
+                return true;
+            }
+        }
+        // `+` can start `+inf` or a number
+        b'+' => {
+            if s == "+inf" || looks_like_number(s) {
+                return true;
+            }
+        }
+        // Digits can start numbers
+        b'0'..=b'9' => {
+            if looks_like_number(s) {
+                return true;
+            }
+        }
+        // Reserved words by first letter
+        b'n' if s == "null" || s == "nan" => return true,
+        b't' if s == "true" => return true,
+        b'f' if s == "false" => return true,
+        b'i' if s == "inf" => return true,
+        // Multi-byte UTF-8 first byte: check c-printable
+        0x80.. => {
+            let ch = s.chars().next().unwrap();
+            if !is_printable_for_bare(ch) {
+                return true;
+            }
+        }
         _ => {}
     }
 
-    let bytes = s.as_bytes();
-    let first = bytes[0];
-
-    // `-` and `:` are only valid bare-string starters when followed by ns-char
-    if (first == b'-' || first == b':')
-        && (bytes.len() < 2 || bytes[1] == b' ' || bytes[1] == b'\t')
-    {
-        return true;
-    }
-
-    // Looks like a number
-    if looks_like_number(s) {
-        return true;
-    }
-
-    // Contains characters that would break bare string parsing
-    for (i, &b) in bytes.iter().enumerate() {
+    // Scan remaining bytes for problematic characters.
+    // Skip past the first character (which may be multi-byte).
+    let mut i = if first < 0x80 { 1 } else { s.chars().next().unwrap().len_utf8() };
+    while i < bytes.len() {
+        let b = bytes[i];
         match b {
-            // Control characters or characters needing escaping
-            0x00..=0x08 | 0x0B | 0x0C | 0x0E..=0x1F | 0x7F | b'"' | b'\\' => {
-                return true;
-            }
-            // Flow indicators and '#' anywhere would break parsing
-            b',' | b'[' | b']' | b'{' | b'}' | b'#' => return true,
-            // `: ` or `:\t` mid-string would be parsed as mapping indicator
+            // ASCII control characters, escaping chars, flow indicators, '#'
+            0x00..=0x08 | 0x0B..=0x1F | 0x7F | b'"' | b'\\' | b',' | b'[' | b']' | b'{' | b'}'
+            | b'#' => return true,
+            // `: ` or `:\t` mid-string
             b':' if i + 1 < bytes.len() && (bytes[i + 1] == b' ' || bytes[i + 1] == b'\t') => {
                 return true;
             }
+            // Multi-byte UTF-8: decode and check c-printable
+            0x80.. => {
+                let ch = s[i..].chars().next().unwrap();
+                if !is_printable_for_bare(ch) {
+                    return true;
+                }
+                i += ch.len_utf8();
+                continue;
+            }
             _ => {}
         }
-    }
-
-    // Check for non-printable characters outside ASCII (C1 control block,
-    // surrogates, etc.) by iterating chars.
-    for ch in s.chars() {
-        if !is_printable_for_bare(ch) {
-            return true;
-        }
-    }
-
-    // Trailing `:` would be parsed as a mapping key
-    if bytes.last() == Some(&b':') {
-        return true;
-    }
-
-    // Trailing whitespace would be stripped
-    if bytes.last().is_some_and(|&b| b == b' ' || b == b'\t') {
-        return true;
-    }
-
-    // Leading whitespace
-    if first == b' ' || first == b'\t' {
-        return true;
+        i += 1;
     }
 
     false
