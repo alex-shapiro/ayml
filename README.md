@@ -90,7 +90,7 @@ Deserialization benchmarks are for `typed` variations (`value` variations are ro
 | strings     | 222 MiB/s   | 602 MiB/s |
 | large_50    | 104 MiB/s   | 565 MiB/s |
 
-Based on comparative benchmarks, if you are looking for maximal performance then you should consider `serde_json`. It deserializes 6-7x faster and serializes 2-3x faster than AYML. AYML performance is ok for typical config use cases, where serialization performance is not a bottleneck.
+Based on comparative benchmarks, if you are looking for maximal performance then you should consider `serde_json`. It deserializes 6-7x faster and serializes 2-3x faster than AYML. AYML performance is adequate for typical config use cases, where serialization performance is not a bottleneck.
 
 ## Acknowledgements
 
