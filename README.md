@@ -71,10 +71,16 @@ cargo +nightly fuzz run fuzz_deserialize fuzz/artifacts/fuzz_deserialize/crash-<
 
 #### Benchmarking
 
+```sh
+# benchmark ayml
+cargo bench
+
+# benchmark ayml against serde_json
+cargo bench --bench serde_comparison
+```
+
 All tests performed on a Macbook Pro M4 Max.
 Deserialization benchmarks are for `typed` variations (`value` variations are roughly 60% as fast). 
-
-If you are looking for high performance, consider `serde_json`. It deserializes 6-7x faster and serializes 2-3x faster than AYML. AYML performance is adequate for typical config use cases, where serialization performance is not a bottleneck.
 
 |  Benchmark  | Deserialize | Serialize |
 |-------------|-------------|-----------|
@@ -84,7 +90,7 @@ If you are looking for high performance, consider `serde_json`. It deserializes 
 | strings     | 222 MiB/s   | 602 MiB/s |
 | large_50    | 104 MiB/s   | 565 MiB/s |
 
-
+Based on comparative benchmarks, if you are looking for maximal performance then you should consider `serde_json`. It deserializes 6-7x faster and serializes 2-3x faster than AYML. AYML performance is ok for typical config use cases, where serialization performance is not a bottleneck.
 
 ## Acknowledgements
 
