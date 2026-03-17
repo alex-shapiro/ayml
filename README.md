@@ -69,6 +69,24 @@ Fuzz test crashes are saved to `fuzz/artifacts/<target>/`. Reproduce with:
 cargo +nightly fuzz run fuzz_deserialize fuzz/artifacts/fuzz_deserialize/crash-<hash>
 ```
 
+#### Benchmarking
+
+All tests performed on a M4 Max Macbook Pro.
+
+┌─────────────┬───────────┐
+│  Benchmark  │ Value     │
+├─────────────┼───────────┤
+│ flat        │ 352 MiB/s │
+├─────────────┼───────────┤
+│ nested      │ 425 MiB/s │
+├─────────────┼───────────┤
+│ seq_of_maps │ 468 MiB/s │
+├─────────────┼───────────┤
+│ strings     │ 620 MiB/s │
+├─────────────┼───────────┤
+│ large_50    │ 553 MiB/s │
+└─────────────┴───────────┘
+
 ## Acknowledgements
 
 * The AYML spec doc is derived in large part from the [YAML specification](https://yaml.org/spec).
