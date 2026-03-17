@@ -890,8 +890,19 @@ fn needs_quoting(s: &str) -> bool {
     // and leading whitespace without redundant branching.
     match first {
         // Leading whitespace, control characters, indicators that are never valid bare starters
-        b' ' | b'\t' | 0x00..=0x08 | 0x0B..=0x1F | 0x7F | b'"' | b'\\' | b',' | b'[' | b']'
-        | b'{' | b'}' | b'#' => return true,
+        b' '
+        | b'\t'
+        | 0x00..=0x08
+        | 0x0B..=0x1F
+        | 0x7F
+        | b'"'
+        | b'\\'
+        | b','
+        | b'['
+        | b']'
+        | b'{'
+        | b'}'
+        | b'#' => return true,
         // `-` and `:` require a following ns-char; also check for numbers/reserved words
         b'-' => {
             if bytes.len() < 2 || bytes[1] == b' ' || bytes[1] == b'\t' {
@@ -935,12 +946,25 @@ fn needs_quoting(s: &str) -> bool {
 
     // Scan remaining bytes for problematic characters.
     // Skip past the first character (which may be multi-byte).
-    let mut i = if first < 0x80 { 1 } else { s.chars().next().unwrap().len_utf8() };
+    let mut i = if first < 0x80 {
+        1
+    } else {
+        s.chars().next().unwrap().len_utf8()
+    };
     while i < bytes.len() {
         let b = bytes[i];
         match b {
             // ASCII control characters, escaping chars, flow indicators, '#'
-            0x00..=0x08 | 0x0B..=0x1F | 0x7F | b'"' | b'\\' | b',' | b'[' | b']' | b'{' | b'}'
+            0x00..=0x08
+            | 0x0B..=0x1F
+            | 0x7F
+            | b'"'
+            | b'\\'
+            | b','
+            | b'['
+            | b']'
+            | b'{'
+            | b'}'
             | b'#' => return true,
             // `: ` or `:\t` mid-string
             b':' if i + 1 < bytes.len() && (bytes[i + 1] == b' ' || bytes[i + 1] == b'\t') => {

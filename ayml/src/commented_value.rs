@@ -151,8 +151,6 @@ impl PartialEq for CommentedValueKind {
 // Note: `Eq` is intentionally not implemented because `CommentedValueKind`
 // can contain `Float(f64)`. See `Value` for details.
 
-// ── Display ─────────────────────────────────────────────────────────
-
 impl fmt::Display for CommentedValueKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -198,5 +196,16 @@ impl fmt::Display for CommentedValue {
             write!(f, " # {comment}")?;
         }
         Ok(())
+    }
+}
+
+#[cfg(feature = "schemars")]
+impl schemars::JsonSchema for CommentedValueKind {
+    fn schema_name() -> String {
+        "CommentedValueKind".to_owned()
+    }
+
+    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        crate::Value::json_schema(generator)
     }
 }

@@ -121,3 +121,22 @@ impl<'de, T: Deserialize<'de>> Visitor<'de> for CommentedVisitor<T> {
         })
     }
 }
+
+#[cfg(feature = "schemars")]
+impl<T: schemars::JsonSchema> schemars::JsonSchema for Commented<T> {
+    fn schema_name() -> String {
+        T::schema_name()
+    }
+
+    fn schema_id() -> std::borrow::Cow<'static, str> {
+        T::schema_id()
+    }
+
+    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        T::json_schema(generator)
+    }
+
+    fn is_referenceable() -> bool {
+        T::is_referenceable()
+    }
+}

@@ -2,11 +2,22 @@
 name = "ayml"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+description = "simplified YAML variant"
+authors = ["Alex Shapiro"]
+repository = "https://github.com/alex-shapiro/ayml"
+readme = "README.md"
+keywords = ["ayml", "yaml"]
+categories = ["config", "parsing"]
+
+[features]
+schemars = ["dep:schemars"]
 
 [dependencies]
 indexmap = { version = "2.13.0", features = ["serde"] }
 itoa = "1"
 ryu = "1"
+schemars = { version = "0.8", features = ["indexmap2"], optional = true }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2.0.18"
 

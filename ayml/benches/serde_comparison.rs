@@ -178,7 +178,13 @@ fn bench_deserialize(c: &mut Criterion) {
 
     bench_de_pair!(group, "flat", FLAT_AYML, FLAT_JSON, FlatConfig);
     bench_de_pair!(group, "nested", NESTED_AYML, NESTED_JSON, NestedConfig);
-    bench_de_pair!(group, "seq_of_maps", SEQ_OF_MAPS_AYML, SEQ_OF_MAPS_JSON, Vec<Person>);
+    bench_de_pair!(
+        group,
+        "seq_of_maps",
+        SEQ_OF_MAPS_AYML,
+        SEQ_OF_MAPS_JSON,
+        Vec<Person>
+    );
     bench_de_pair!(group, "strings", STRINGS_AYML, STRINGS_JSON, Article);
     bench_de_pair!(group, "large_50", &large_ayml, &large_json, Vec<Entry>);
 
