@@ -19,3 +19,7 @@ serde_json = "1"
 [[bench]]
 name = "serde"
 harness = false
+
+[[bench]]
+name = "serde_comparison"
+harness = false
