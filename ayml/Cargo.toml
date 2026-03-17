@@ -6,7 +6,7 @@ license = "MIT"
 description = "simplified YAML variant"
 authors = ["Alex Shapiro"]
 repository = "https://github.com/alex-shapiro/ayml"
-readme = "README.md"
+readme = "../README.md"
 keywords = ["ayml", "yaml"]
 categories = ["config", "parsing"]
 
