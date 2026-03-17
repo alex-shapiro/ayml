@@ -873,52 +873,73 @@ fn capture_option_string<T: ?Sized + Serialize>(value: &T) -> Option<String> {
 
 /// Returns true if the string must be double-quoted in AYML output.
 fn needs_quoting(s: &str) -> bool {
-    if s.is_empty() {
+    let bytes = s.as_bytes();
+    if bytes.is_empty() {
         return true;
     }
 
-    // Reserved scalar values
-    match s {
-        "null" | "true" | "false" | "inf" | "+inf" | "-inf" | "nan" => return true,
-        _ => {}
-    }
-
-    let bytes = s.as_bytes();
     let first = bytes[0];
     let last = bytes[bytes.len() - 1];
 
-    // Leading whitespace
-    if first == b' ' || first == b'\t' {
-        return true;
-    }
-
-    // `-` and `:` are only valid bare-string starters when followed by ns-char
-    if (first == b'-' || first == b':')
-        && (bytes.len() < 2 || bytes[1] == b' ' || bytes[1] == b'\t')
-    {
-        return true;
-    }
-
-    // Trailing `:` would be parsed as a mapping value indicator
+    // Trailing `:`, space, or tab always needs quoting
     if last == b':' || last == b' ' || last == b'\t' {
         return true;
     }
 
-    // Only check looks_like_number for strings that could plausibly be numbers
-    if (first.is_ascii_digit() || first == b'+' || first == b'-') && looks_like_number(s) {
-        return true;
+    // Dispatch on first byte: handle reserved words, indicators, numbers,
+    // and leading whitespace without redundant branching.
+    match first {
+        // Leading whitespace, control characters, indicators that are never valid bare starters
+        b' ' | b'\t' | 0x00..=0x08 | 0x0B..=0x1F | 0x7F | b'"' | b'\\' | b',' | b'[' | b']'
+        | b'{' | b'}' | b'#' => return true,
+        // `-` and `:` require a following ns-char; also check for numbers/reserved words
+        b'-' => {
+            if bytes.len() < 2 || bytes[1] == b' ' || bytes[1] == b'\t' {
+                return true;
+            }
+            if s == "-inf" || looks_like_number(s) {
+                return true;
+            }
+        }
+        b':' => {
+            if bytes.len() < 2 || bytes[1] == b' ' || bytes[1] == b'\t' {
+                return true;
+            }
+        }
+        // `+` can start `+inf` or a number
+        b'+' => {
+            if s == "+inf" || looks_like_number(s) {
+                return true;
+            }
+        }
+        // Digits can start numbers
+        b'0'..=b'9' => {
+            if looks_like_number(s) {
+                return true;
+            }
+        }
+        // Reserved words by first letter
+        b'n' if s == "null" || s == "nan" => return true,
+        b't' if s == "true" => return true,
+        b'f' if s == "false" => return true,
+        b'i' if s == "inf" => return true,
+        // Multi-byte UTF-8 first byte: check c-printable
+        0x80.. => {
+            let ch = s.chars().next().unwrap();
+            if !is_printable_for_bare(ch) {
+                return true;
+            }
+        }
+        _ => {}
     }
 
-    // Single pass: check for characters that break bare string parsing.
-    // ASCII bytes are fully checked here; multi-byte sequences (>= 0x80)
-    // are checked against c-printable via a char decode.
-    let mut i = 0;
+    // Scan remaining bytes for problematic characters.
+    // Skip past the first character (which may be multi-byte).
+    let mut i = if first < 0x80 { 1 } else { s.chars().next().unwrap().len_utf8() };
     while i < bytes.len() {
         let b = bytes[i];
         match b {
-            // ASCII control characters, characters needing escaping,
-            // flow indicators, and '#'
-            // (0x09=tab is allowed, 0x0A=LF triggers triple-quoting in serialize_str)
+            // ASCII control characters, escaping chars, flow indicators, '#'
             0x00..=0x08 | 0x0B..=0x1F | 0x7F | b'"' | b'\\' | b',' | b'[' | b']' | b'{' | b'}'
             | b'#' => return true,
             // `: ` or `:\t` mid-string
@@ -927,8 +948,6 @@ fn needs_quoting(s: &str) -> bool {
             }
             // Multi-byte UTF-8: decode and check c-printable
             0x80.. => {
-                // SAFETY: s is a valid &str so this is valid UTF-8.
-                // Find the char at this byte offset and check it.
                 let ch = s[i..].chars().next().unwrap();
                 if !is_printable_for_bare(ch) {
                     return true;
