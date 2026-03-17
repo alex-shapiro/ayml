@@ -71,15 +71,16 @@ cargo +nightly fuzz run fuzz_deserialize fuzz/artifacts/fuzz_deserialize/crash-<
 
 #### Benchmarking
 
-All tests performed on a M4 Max Macbook Pro.
+All tests performed on a Macbook Pro M4 Max.
+Deserialization benchmarks are for `typed` variations (`value` variations are roughly 60% as fast).
 
-|  Benchmark  | Value     |
-|-------------|-----------|
-| flat        | 352 MiB/s |
-| nested      | 425 MiB/s |
-| seq_of_maps | 468 MiB/s |
-| strings     | 620 MiB/s |
-| large_50    | 553 MiB/s |
+|  Benchmark  | Deserialize | Serialize |
+|-------------|-------------|-----------|
+| flat        | 102 MiB/s   | 364 MiB/s |
+| nested      | 106 MiB/s   | 434 MiB/s |
+| seq_of_maps | 101 MiB/s   | 483 MiB/s |
+| strings     | 222 MiB/s   | 602 MiB/s |
+| large_50    | 104 MiB/s   | 565 MiB/s |
 
 ## Acknowledgements
 
