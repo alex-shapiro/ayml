@@ -13,9 +13,7 @@ fn value_to_json(value: &Value) -> serde_json::Value {
         Value::Int(i) => json!(i),
         Value::Float(f) => json!(f),
         Value::Str(s) => json!(s),
-        Value::Seq(items) => {
-            serde_json::Value::Array(items.iter().map(node_to_json).collect())
-        }
+        Value::Seq(items) => serde_json::Value::Array(items.iter().map(node_to_json).collect()),
         Value::Map(map) => {
             let obj = map
                 .iter()

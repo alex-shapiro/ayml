@@ -39,28 +39,19 @@ mod tests {
     #[test]
     fn yaml_language_server_prefix() {
         let comment = "yaml-language-server: $schema=https://example.com/schema.json";
-        assert_eq!(
-            schema_uri(comment),
-            Some("https://example.com/schema.json")
-        );
+        assert_eq!(schema_uri(comment), Some("https://example.com/schema.json"));
     }
 
     #[test]
     fn language_server_prefix() {
         let comment = "language-server: $schema=https://example.com/schema.json";
-        assert_eq!(
-            schema_uri(comment),
-            Some("https://example.com/schema.json")
-        );
+        assert_eq!(schema_uri(comment), Some("https://example.com/schema.json"));
     }
 
     #[test]
     fn directive_among_other_comments() {
         let comment = "This is a config file\nlanguage-server: $schema=https://example.com/s.json\nMore comments";
-        assert_eq!(
-            schema_uri(comment),
-            Some("https://example.com/s.json")
-        );
+        assert_eq!(schema_uri(comment), Some("https://example.com/s.json"));
     }
 
     #[test]
@@ -76,9 +67,6 @@ mod tests {
     #[test]
     fn extra_whitespace() {
         let comment = "  yaml-language-server:   $schema=https://example.com/s.json  ";
-        assert_eq!(
-            schema_uri(comment),
-            Some("https://example.com/s.json")
-        );
+        assert_eq!(schema_uri(comment), Some("https://example.com/s.json"));
     }
 }
