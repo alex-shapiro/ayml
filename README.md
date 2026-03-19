@@ -1,7 +1,7 @@
 # AYML
 
-> [!WARNING]
-> Status: Not Ready For Production Use
+> [!NOTE]
+> Status: Beta Software, Handle With Care
 
 Simplified YAML variant built for [Ash](https://ashell.dev)
 
