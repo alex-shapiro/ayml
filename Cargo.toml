@@ -1,6 +1,7 @@
 [workspace]
 members = [
-    "ayml-core",
     "ayml",
+    "ayml-core",
+    "ayml-lsp",
 ]
 resolver = "3"
