@@ -1,3 +1,5 @@
+mod convert;
+
 use lsp_server::{Connection, Message, Notification, Response};
 use lsp_types::{
     Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
@@ -33,6 +35,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
 fn main_loop(connection: &Connection) -> Result<(), Box<dyn std::error::Error>> {
     let mut documents: HashMap<Uri, String> = HashMap::new();
+    let mut schema_cache: HashMap<String, serde_json::Value> = HashMap::new();
 
     for msg in &connection.receiver {
         match msg {
@@ -53,14 +56,14 @@ fn main_loop(connection: &Connection) -> Result<(), Box<dyn std::error::Error>> 
                     let uri = params.text_document.uri.clone();
                     let text = params.text_document.text.clone();
                     documents.insert(uri.clone(), text.clone());
-                    publish_diagnostics(connection, uri, &text)?;
+                    publish_diagnostics(connection, uri, &text, &mut schema_cache)?;
                 }
                 lsp_types::notification::DidChangeTextDocument::METHOD => {
                     let params: DidChangeTextDocumentParams = serde_json::from_value(not.params)?;
                     let uri = params.text_document.uri.clone();
                     if let Some(change) = params.content_changes.into_iter().next() {
                         documents.insert(uri.clone(), change.text.clone());
-                        publish_diagnostics(connection, uri, &change.text)?;
+                        publish_diagnostics(connection, uri, &change.text, &mut schema_cache)?;
                     }
                 }
                 lsp_types::notification::DidCloseTextDocument::METHOD => {
@@ -88,21 +91,33 @@ fn publish_diagnostics(
     connection: &Connection,
     uri: Uri,
     text: &str,
+    schema_cache: &mut HashMap<String, serde_json::Value>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let diagnostics = match ayml_core::parse(text) {
-        Ok(_) => vec![],
+    let mut diagnostics = Vec::new();
+
+    match ayml_core::parse(text) {
         Err(e) => {
             let line = e.line.saturating_sub(1) as u32;
             let col = e.column.saturating_sub(1) as u32;
-            vec![Diagnostic {
+            diagnostics.push(Diagnostic {
                 range: Range::new(Position::new(line, col), Position::new(line, col)),
                 severity: Some(DiagnosticSeverity::ERROR),
                 source: Some("ayml".to_string()),
-                message: format!("{}", e),
+                message: format!("{e}"),
                 ..Default::default()
-            }]
+            });
         }
-    };
+        Ok(node) => {
+            // Check for schema directive in the document comment.
+            if let Some(comment) = &node.comment {
+                if let Some(schema_url) = ayml_core::schema_uri(comment) {
+                    let schema_diagnostics =
+                        validate_with_schema(&node, schema_url, schema_cache);
+                    diagnostics.extend(schema_diagnostics);
+                }
+            }
+        }
+    }
 
     let params = PublishDiagnosticsParams {
         uri,
@@ -111,6 +126,76 @@ fn publish_diagnostics(
     };
     send_notification::<lsp_types::notification::PublishDiagnostics>(connection, params)?;
     Ok(())
+}
+
+fn validate_with_schema(
+    node: &ayml_core::Node,
+    schema_url: &str,
+    cache: &mut HashMap<String, serde_json::Value>,
+) -> Vec<Diagnostic> {
+    let schema_value = match cache.get(schema_url) {
+        Some(v) => v.clone(),
+        None => match fetch_schema(schema_url) {
+            Ok(v) => {
+                cache.insert(schema_url.to_string(), v.clone());
+                v
+            }
+            Err(e) => {
+                return vec![Diagnostic {
+                    range: Range::new(Position::new(0, 0), Position::new(0, 0)),
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    source: Some("ayml".to_string()),
+                    message: format!("failed to fetch schema: {e}"),
+                    ..Default::default()
+                }];
+            }
+        },
+    };
+
+    let validator = match jsonschema::validator_for(&schema_value) {
+        Ok(v) => v,
+        Err(e) => {
+            return vec![Diagnostic {
+                range: Range::new(Position::new(0, 0), Position::new(0, 0)),
+                severity: Some(DiagnosticSeverity::WARNING),
+                source: Some("ayml".to_string()),
+                message: format!("invalid schema: {e}"),
+                ..Default::default()
+            }];
+        }
+    };
+
+    let json_value = convert::node_to_json(node);
+
+    validator
+        .iter_errors(&json_value)
+        .map(|error| {
+            let path = error.instance_path().to_string();
+            let message = if path.is_empty() {
+                format!("{error}")
+            } else {
+                format!("{path}: {error}")
+            };
+            Diagnostic {
+                range: Range::new(Position::new(0, 0), Position::new(0, 0)),
+                severity: Some(DiagnosticSeverity::ERROR),
+                source: Some("ayml-schema".to_string()),
+                message,
+                ..Default::default()
+            }
+        })
+        .collect()
+}
+
+fn fetch_schema(url: &str) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    if url.starts_with("file://") {
+        let path = url.strip_prefix("file://").unwrap();
+        let content = std::fs::read_to_string(path)?;
+        Ok(serde_json::from_str(&content)?)
+    } else {
+        let body = ureq::get(url).call()?.body_mut().read_to_string()?;
+        Ok(serde_json::from_str(&body)?)
+    }
 }
 
 fn send_notification<N: lsp_types::notification::Notification>(

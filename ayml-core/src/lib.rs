@@ -6,6 +6,9 @@ mod value;
 pub mod emitter;
 pub mod parser;
 
+mod directive;
+
+pub use directive::schema_uri;
 pub use error::{Error, ErrorKind, Span};
 pub use parser::DEFAULT_MAX_DEPTH;
 pub use parser::scanner::Scanner;
