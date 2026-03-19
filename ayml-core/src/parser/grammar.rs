@@ -100,6 +100,8 @@ impl<'a> Parser<'a> {
             return Err(self.scanner.error(ErrorKind::ByteOrderMark));
         }
 
+        let start = self.scanner.offset;
+
         // Leading comments
         let comment = self.parse_comment_block(0);
 
@@ -123,6 +125,7 @@ impl<'a> Parser<'a> {
                 .error(ErrorKind::Expected("end of input".into())));
         }
 
+        node.span = Span::new(start, self.scanner.offset);
         Ok(node)
     }
 
@@ -330,7 +333,9 @@ impl<'a> Parser<'a> {
             match self.scanner.peek() {
                 Some('"') => {
                     self.scanner.advance();
-                    return Ok(Node::new(Value::Str(value)));
+                    let mut node = Node::new(Value::Str(value));
+                    node.span = Span::new(start, self.scanner.offset);
+                    return Ok(node);
                 }
                 Some('\\') => {
                     self.scanner.advance();
@@ -429,7 +434,9 @@ impl<'a> Parser<'a> {
             start,
             self.scanner.source(),
         )?;
-        Ok(Node::new(Value::Str(result)))
+        let mut node = Node::new(Value::Str(result));
+        node.span = Span::new(start, self.scanner.offset);
+        Ok(node)
     }
 
     /// Helper: take `n` hex digits from a char iterator and decode.
@@ -578,7 +585,9 @@ impl<'a> Parser<'a> {
             }
         };
 
-        Ok(Node::new(value))
+        let mut node = Node::new(value);
+        node.span = Span::new(start, self.scanner.offset);
+        Ok(node)
     }
 
     /// Scan a bare string according to ns-bare-string(c).
@@ -817,8 +826,11 @@ impl<'a> Parser<'a> {
         }
 
         // Parse the sequence at the detected indent level
+        let start = self.scanner.offset;
         let entries = self.parse_block_sequence(indent)?;
-        Ok(Some(Node::new(Value::Seq(entries))))
+        let mut node = Node::new(Value::Seq(entries));
+        node.span = Span::new(start, self.scanner.offset);
+        Ok(Some(node))
     }
 
     /// l-block-sequence(n)
@@ -909,6 +921,7 @@ impl<'a> Parser<'a> {
     /// line as `- `).
     fn try_compact_mapping(&mut self, n: usize) -> Result<Option<Node>, Error> {
         let saved = self.scanner.offset;
+        let start = self.scanner.offset;
 
         // Try to parse a mapping key followed by `: `
         let raw_key = match self.try_parse_mapping_key(Context::Block) {
@@ -990,7 +1003,9 @@ impl<'a> Parser<'a> {
             map.insert(next_key, value_node);
         }
 
-        Ok(Some(Node::new(Value::Map(map))))
+        let mut node = Node::new(Value::Map(map));
+        node.span = Span::new(start, self.scanner.offset);
+        Ok(Some(node))
     }
 
     // ── Block Mapping ────────────────────────────────────────────────
@@ -1018,8 +1033,13 @@ impl<'a> Parser<'a> {
         }
 
         // Try to parse a full mapping
+        let start = self.scanner.offset;
         match self.parse_block_mapping(indent) {
-            Ok(map) => Ok(Some(Node::new(Value::Map(map)))),
+            Ok(map) => {
+                let mut node = Node::new(Value::Map(map));
+                node.span = Span::new(start, self.scanner.offset);
+                Ok(Some(node))
+            }
             Err(e) if is_hard_error(&e) => Err(e),
             Err(_) => {
                 self.scanner.offset = saved;
@@ -1318,6 +1338,7 @@ impl<'a> Parser<'a> {
 
     /// c-flow-sequence
     fn parse_flow_sequence(&mut self) -> Result<Node, Error> {
+        let start = self.scanner.offset;
         self.scanner.advance(); // `[`
         self.skip_flow_whitespace();
 
@@ -1349,11 +1370,14 @@ impl<'a> Parser<'a> {
                 .error(ErrorKind::Expected("`]` to close flow sequence".into())));
         }
 
-        Ok(Node::new(Value::Seq(entries)))
+        let mut node = Node::new(Value::Seq(entries));
+        node.span = Span::new(start, self.scanner.offset);
+        Ok(node)
     }
 
     /// c-flow-mapping
     fn parse_flow_mapping(&mut self) -> Result<Node, Error> {
+        let start = self.scanner.offset;
         self.scanner.advance(); // `{`
         self.skip_flow_whitespace();
 
@@ -1393,7 +1417,9 @@ impl<'a> Parser<'a> {
                 .error(ErrorKind::Expected("`}` to close flow mapping".into())));
         }
 
-        Ok(Node::new(Value::Map(map)))
+        let mut node = Node::new(Value::Map(map));
+        node.span = Span::new(start, self.scanner.offset);
+        Ok(node)
     }
 
     /// ns-flow-mapping-entry

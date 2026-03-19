@@ -112,7 +112,7 @@ fn publish_diagnostics(
             if let Some(comment) = &node.comment
                 && let Some(schema_url) = ayml_core::schema_uri(comment)
             {
-                let schema_diagnostics = validate_with_schema(&node, schema_url, schema_cache);
+                let schema_diagnostics = validate_with_schema(&node, text, schema_url, schema_cache);
                 diagnostics.extend(schema_diagnostics);
             }
         }
@@ -129,6 +129,7 @@ fn publish_diagnostics(
 
 fn validate_with_schema(
     node: &ayml_core::Node,
+    text: &str,
     schema_url: &str,
     cache: &mut HashMap<String, serde_json::Value>,
 ) -> Vec<Diagnostic> {
@@ -170,13 +171,16 @@ fn validate_with_schema(
         .iter_errors(&json_value)
         .map(|error| {
             let path = error.instance_path().to_string();
+            let range = resolve_instance_path(node, &path)
+                .map(|span| span_to_range(text, span))
+                .unwrap_or(Range::new(Position::new(0, 0), Position::new(0, 0)));
             let message = if path.is_empty() {
                 format!("{error}")
             } else {
                 format!("{path}: {error}")
             };
             Diagnostic {
-                range: Range::new(Position::new(0, 0), Position::new(0, 0)),
+                range,
                 severity: Some(DiagnosticSeverity::ERROR),
                 source: Some("ayml-schema".to_string()),
                 message,
@@ -184,6 +188,63 @@ fn validate_with_schema(
             }
         })
         .collect()
+}
+
+/// Walk a JSON pointer path (e.g. "/servers/0/port") through the Node tree
+/// and return the span of the target node.
+fn resolve_instance_path(node: &ayml_core::Node, path: &str) -> Option<ayml_core::Span> {
+    if path.is_empty() {
+        return Some(node.span);
+    }
+
+    let segments: Vec<&str> = path.strip_prefix('/')?.split('/').collect();
+    let mut current = node;
+
+    for segment in &segments {
+        match &current.value {
+            ayml_core::Value::Map(map) => {
+                let key = ayml_core::MapKey::String(segment.to_string());
+                current = map.get(&key)?;
+            }
+            ayml_core::Value::Seq(items) => {
+                let index: usize = segment.parse().ok()?;
+                current = items.get(index)?;
+            }
+            _ => return None,
+        }
+    }
+
+    Some(current.span)
+}
+
+/// Convert a byte-offset Span to an LSP Range using the source text.
+fn span_to_range(text: &str, span: ayml_core::Span) -> Range {
+    let start = offset_to_position(text, span.start);
+    let end = offset_to_position(text, span.end);
+    Range::new(start, end)
+}
+
+/// Convert a byte offset to a 0-based LSP Position.
+fn offset_to_position(text: &str, offset: usize) -> Position {
+    let offset = offset.min(text.len());
+    let mut line = 0u32;
+    let mut col = 0u32;
+    for (i, ch) in text[..offset].char_indices() {
+        if ch == '\n' {
+            line += 1;
+            col = 0;
+        } else if ch == '\r' {
+            line += 1;
+            col = 0;
+            // Skip the \n in \r\n
+            if text.as_bytes().get(i + 1) == Some(&b'\n') {
+                continue;
+            }
+        } else {
+            col += 1;
+        }
+    }
+    Position::new(line, col)
 }
 
 fn fetch_schema(url: &str) -> Result<serde_json::Value, Box<dyn std::error::Error>> {

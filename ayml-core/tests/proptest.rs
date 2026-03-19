@@ -1,4 +1,4 @@
-use ayml_core::{MapKey, Node, Value};
+use ayml_core::{MapKey, Node, Span, Value};
 use indexmap::IndexMap;
 use proptest::prelude::*;
 
@@ -153,6 +153,74 @@ fn values_equal(a: &Value, b: &Value) -> bool {
     }
 }
 
+/// Recursively verify span invariants on a parsed node tree.
+fn check_span_invariants(
+    node: &Node,
+    input: &str,
+    parent_span: Option<Span>,
+) -> Result<(), TestCaseError> {
+    let span = node.span;
+
+    // start <= end
+    prop_assert!(
+        span.start <= span.end,
+        "span start ({}) > end ({})",
+        span.start,
+        span.end
+    );
+
+    // within input bounds
+    prop_assert!(
+        span.end <= input.len(),
+        "span end ({}) > input len ({})",
+        span.end,
+        input.len()
+    );
+
+    // child within parent (if provided)
+    if let Some(parent) = parent_span {
+        prop_assert!(
+            span.start >= parent.start && span.end <= parent.end,
+            "child span {}..{} not within parent span {}..{}",
+            span.start,
+            span.end,
+            parent.start,
+            parent.end,
+        );
+    }
+
+    // For scalars, verify the span text re-parses to the same value.
+    if node.value.is_scalar() {
+        let span_text = &input[span.start..span.end];
+        if let Ok(reparsed) = ayml_core::parse(span_text) {
+            prop_assert!(
+                values_equal(&node.value, &reparsed.value),
+                "scalar span text {:?} re-parsed to {:?}, expected {:?}",
+                span_text,
+                reparsed.value,
+                node.value,
+            );
+        }
+    }
+
+    // Recurse into children
+    match &node.value {
+        Value::Seq(items) => {
+            for item in items {
+                check_span_invariants(item, input, Some(span))?;
+            }
+        }
+        Value::Map(map) => {
+            for (_, value_node) in map {
+                check_span_invariants(value_node, input, Some(span))?;
+            }
+        }
+        _ => {}
+    }
+
+    Ok(())
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(10_000))]
 
@@ -181,5 +249,25 @@ proptest! {
     fn parser_no_panic(input in "[\\s\\S]{0,200}") {
         // We don't care about the result — just that it doesn't panic.
         let _ = ayml_core::parse(&input);
+    }
+
+    /// All parsed spans must be valid: start <= end, within input bounds,
+    /// and child spans nested within parent spans.
+    #[test]
+    fn spans_valid_after_round_trip(node in arb_node(4)) {
+        let emitted = ayml_core::emit(&node);
+        let Ok(parsed) = ayml_core::parse(&emitted) else {
+            return Ok(());
+        };
+
+        check_span_invariants(&parsed, &emitted, None)?;
+    }
+
+    /// Spans are valid on arbitrary (possibly invalid) input.
+    #[test]
+    fn spans_valid_on_arbitrary_input(input in "[\\s\\S]{0,200}") {
+        if let Ok(parsed) = ayml_core::parse(&input) {
+            check_span_invariants(&parsed, &input, None)?;
+        }
     }
 }
