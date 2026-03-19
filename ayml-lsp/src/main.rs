@@ -109,12 +109,11 @@ fn publish_diagnostics(
         }
         Ok(node) => {
             // Check for schema directive in the document comment.
-            if let Some(comment) = &node.comment {
-                if let Some(schema_url) = ayml_core::schema_uri(comment) {
+            if let Some(comment) = &node.comment
+                && let Some(schema_url) = ayml_core::schema_uri(comment) {
                     let schema_diagnostics = validate_with_schema(&node, schema_url, schema_cache);
                     diagnostics.extend(schema_diagnostics);
                 }
-            }
         }
     }
 
