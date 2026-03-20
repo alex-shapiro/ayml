@@ -1,6 +1,6 @@
 name = "AYML"
 grammar = "yaml"
-path_suffixes = ["ayml", "ayml.yml"]
+path_suffixes = ["ayml"]
 line_comments = ["# "]
 tab_size = 2
 hard_tabs = false
