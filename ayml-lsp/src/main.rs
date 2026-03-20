@@ -1,11 +1,14 @@
 mod convert;
+mod locate;
+mod schema;
 
 use lsp_server::{Connection, Message, Notification, Response};
 use lsp_types::{
     Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, InitializeParams, Position, PublishDiagnosticsParams, Range,
+    DidOpenTextDocumentParams, Hover, HoverContents, HoverParams, HoverProviderCapability,
+    InitializeParams, MarkupContent, MarkupKind, Position, PublishDiagnosticsParams, Range,
     ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
-    notification::Notification as _,
+    notification::Notification as _, request::Request as _,
 };
 use std::collections::HashMap;
 
@@ -21,6 +24,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let capabilities = ServerCapabilities {
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
+        hover_provider: Some(HoverProviderCapability::Simple(true)),
         ..Default::default()
     };
 
@@ -43,12 +47,23 @@ fn main_loop(connection: &Connection) -> Result<(), Box<dyn std::error::Error>> 
                 if connection.handle_shutdown(&req)? {
                     return Ok(());
                 }
-                let resp = Response::new_err(
-                    req.id,
-                    lsp_server::ErrorCode::MethodNotFound as i32,
-                    format!("unhandled method: {}", req.method),
-                );
-                connection.sender.send(Message::Response(resp))?;
+                match req.method.as_str() {
+                    lsp_types::request::HoverRequest::METHOD => {
+                        let (id, params): (_, HoverParams) =
+                            req.extract(lsp_types::request::HoverRequest::METHOD)?;
+                        let hover = handle_hover(&params, &documents, &mut schema_cache);
+                        let resp = Response::new_ok(id, hover);
+                        connection.sender.send(Message::Response(resp))?;
+                    }
+                    _ => {
+                        let resp = Response::new_err(
+                            req.id,
+                            lsp_server::ErrorCode::MethodNotFound as i32,
+                            format!("unhandled method: {}", req.method),
+                        );
+                        connection.sender.send(Message::Response(resp))?;
+                    }
+                }
             }
             Message::Notification(not) => match not.method.as_str() {
                 lsp_types::notification::DidOpenTextDocument::METHOD => {
@@ -112,7 +127,8 @@ fn publish_diagnostics(
             if let Some(comment) = &node.comment
                 && let Some(schema_url) = ayml_core::schema_uri(comment)
             {
-                let schema_diagnostics = validate_with_schema(&node, text, schema_url, schema_cache);
+                let schema_diagnostics =
+                    validate_with_schema(&node, text, schema_url, schema_cache);
                 diagnostics.extend(schema_diagnostics);
             }
         }
@@ -245,6 +261,73 @@ fn offset_to_position(text: &str, offset: usize) -> Position {
         }
     }
     Position::new(line, col)
+}
+
+fn handle_hover(
+    params: &HoverParams,
+    documents: &HashMap<Uri, String>,
+    schema_cache: &mut HashMap<String, serde_json::Value>,
+) -> Option<Hover> {
+    let uri = &params.text_document_position_params.text_document.uri;
+    let text = documents.get(uri)?;
+    let node = ayml_core::parse(text).ok()?;
+
+    // Find the schema URL from the document comment.
+    let schema_url = node.comment.as_deref().and_then(ayml_core::schema_uri)?;
+
+    let schema_value = match schema_cache.get(schema_url) {
+        Some(v) => v.clone(),
+        None => {
+            let v = fetch_schema(schema_url).ok()?;
+            schema_cache.insert(schema_url.to_string(), v.clone());
+            v
+        }
+    };
+
+    // Map cursor position to byte offset, then to a path in the node tree.
+    let pos = params.text_document_position_params.position;
+    let offset = position_to_offset(text, pos);
+    let path_segments = locate::path_at_offset(&node, offset);
+    let path_refs: Vec<&str> = path_segments.iter().map(|s| s.as_str()).collect();
+
+    // Walk the schema to the sub-schema at that path.
+    let sub_schema = schema::resolve_sub_schema(&schema_value, &path_refs)?;
+    let content = schema::hover_content(sub_schema)?;
+
+    Some(Hover {
+        contents: HoverContents::Markup(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: content,
+        }),
+        range: None,
+    })
+}
+
+/// Convert a 0-based LSP Position to a byte offset in the source text.
+fn position_to_offset(text: &str, pos: Position) -> usize {
+    let mut line = 0u32;
+    let mut col = 0u32;
+    for (i, ch) in text.char_indices() {
+        if line == pos.line && col == pos.character {
+            return i;
+        }
+        if ch == '\n' {
+            if line == pos.line {
+                return i; // cursor is past end of this line
+            }
+            line += 1;
+            col = 0;
+        } else if ch == '\r' {
+            if line == pos.line {
+                return i;
+            }
+            line += 1;
+            col = 0;
+        } else {
+            col += 1;
+        }
+    }
+    text.len()
 }
 
 fn fetch_schema(url: &str) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
