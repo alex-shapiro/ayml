@@ -244,6 +244,7 @@ impl<R: Read> Deserializer<R> {
 
     fn skip_whitespace_and_comments(&mut self) -> Result<()> {
         let mut seen_comment = false;
+        let mut blank_lines = 0u32;
         loop {
             match self.peek()? {
                 Some(b' ' | b'\t') => {
@@ -251,11 +252,23 @@ impl<R: Read> Deserializer<R> {
                 }
                 Some(b'\n' | b'\r') => {
                     self.eat_break()?;
+                    if seen_comment {
+                        blank_lines += 1;
+                    }
                 }
                 Some(b'#') => {
                     if !seen_comment {
                         self.pending_top_comment = None;
                         seen_comment = true;
+                    }
+                    // Preserve blank lines between comment lines.
+                    if blank_lines > 0 {
+                        if let Some(existing) = &mut self.pending_top_comment {
+                            for _ in 0..blank_lines {
+                                existing.push('\n');
+                            }
+                        }
+                        blank_lines = 0;
                     }
                     self.capture_comment_line()?;
                 }
@@ -343,7 +356,8 @@ impl<R: Read> Deserializer<R> {
         Ok(true)
     }
 
-    fn skip_blank_lines(&mut self) -> Result<()> {
+    fn skip_blank_lines(&mut self) -> Result<usize> {
+        let mut count = 0;
         loop {
             // Peek ahead: is this line blank (only spaces/tabs then newline)?
             let mut i = 0;
@@ -356,21 +370,33 @@ impl<R: Read> Deserializer<R> {
                             self.next_byte()?;
                         }
                         self.eat_break()?;
+                        count += 1;
                         break;
                     }
-                    _ => return Ok(()),
+                    _ => return Ok(count),
                 }
             }
         }
     }
 
     fn skip_block_gaps(&mut self) -> Result<()> {
+        let mut has_comment = false;
         loop {
             let saved_offset = self.byte_offset();
-            self.skip_blank_lines()?;
+            let blanks = self.skip_blank_lines()?;
             // Check for comment lines
             let spaces = self.count_spaces()?;
             if let Some(b'#') = self.peek_at(spaces)? {
+                // Preserve blank lines between comment lines.
+                if has_comment
+                    && blanks > 0
+                    && let Some(existing) = &mut self.pending_top_comment
+                {
+                    for _ in 0..blanks {
+                        existing.push('\n');
+                    }
+                }
+                has_comment = true;
                 // Consume the spaces and the comment
                 for _ in 0..spaces {
                     self.next_byte()?;

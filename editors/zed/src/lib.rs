@@ -10,10 +10,13 @@ impl zed::Extension for AymlExtension {
     fn language_server_command(
         &mut self,
         _language_server_id: &zed::LanguageServerId,
-        _worktree: &zed::Worktree,
+        worktree: &zed::Worktree,
     ) -> zed::Result<zed::Command> {
+        let path = worktree
+            .which("ayml-lsp")
+            .ok_or_else(|| "ayml-lsp not found on PATH".to_string())?;
         Ok(zed::Command {
-            command: "ayml-lsp".to_string(),
+            command: path,
             args: vec![],
             env: Default::default(),
         })

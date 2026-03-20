@@ -1,0 +1,17 @@
+# language-server: $schema=https://hub.ashell.dev/schemas/policy/v1.json
+
+schema_version: 1
+network:
+  # Network access rules
+  rules:
+    # Allow GitHub
+    - host: *.github.com # primary domain
+      direction: outbound
+      ports:
+        - 443
+        - 22
+        # Deny all other traffic
+    - host: 0.0.0.0/0
+      action: deny
+      ports: all
+      precedence: -1

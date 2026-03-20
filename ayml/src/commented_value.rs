@@ -188,7 +188,11 @@ impl fmt::Display for CommentedValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(ref comment) = self.top_comment {
             for line in comment.lines() {
-                writeln!(f, "# {line}")?;
+                if line.is_empty() {
+                    writeln!(f)?;
+                } else {
+                    writeln!(f, "# {line}")?;
+                }
             }
         }
         self.value.fmt(f)?;

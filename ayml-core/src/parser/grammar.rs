@@ -105,6 +105,9 @@ impl<'a> Parser<'a> {
         // Leading comments
         let comment = self.parse_comment_block(0);
 
+        // Skip blank lines between leading comment and content
+        self.skip_blank_lines();
+
         // Root node
         let mut node = self.parse_block_node(0)?;
 
@@ -131,13 +134,14 @@ impl<'a> Parser<'a> {
 
     /// Parse a block of consecutive comment lines at indentation <= n.
     /// Returns the joined comment text (without `#` prefixes), or None.
+    /// Blank lines between comment lines are preserved as empty strings.
     fn parse_comment_block(&mut self, n: usize) -> Option<String> {
         let mut lines: Vec<String> = Vec::new();
 
         loop {
             let saved = self.scanner.offset;
-            // Allow blank lines between comment lines
-            self.skip_blank_lines();
+            // Allow blank lines between comment lines, preserving them.
+            let blank_count = self.count_and_skip_blank_lines();
 
             // Tab in indentation here just means "not a comment line" —
             // the tab will be rejected by the main parse path.
@@ -146,6 +150,13 @@ impl<'a> Parser<'a> {
             if spaces > n || self.scanner.peek_byte_at(spaces) != Some(b'#') {
                 self.scanner.offset = saved;
                 break;
+            }
+
+            // Preserve blank lines between comment lines (not before the first).
+            if !lines.is_empty() {
+                for _ in 0..blank_count {
+                    lines.push(String::new());
+                }
             }
 
             // Consume indent + `#`
@@ -196,33 +207,53 @@ impl<'a> Parser<'a> {
 
     /// Skip blank lines (whitespace-only lines).
     fn skip_blank_lines(&mut self) {
+        self.count_and_skip_blank_lines();
+    }
+
+    /// Skip blank lines and return how many were consumed.
+    fn count_and_skip_blank_lines(&mut self) -> usize {
+        let mut count = 0;
         loop {
             let saved = self.scanner.offset;
             self.scanner.skip_inline_whitespace();
             if self.scanner.is_break() {
                 self.scanner.eat_break();
+                count += 1;
             } else {
                 self.scanner.offset = saved;
                 break;
             }
         }
+        count
     }
 
     /// Skip block gaps (blank lines and comment lines) at indent n.
-    /// Returns any comment block found at the end of the gaps (to attach
-    /// to the next node).
+    /// Returns any accumulated comment text (to attach to the next node).
+    /// Multiple comment blocks separated by blank lines are joined,
+    /// preserving the blank lines between them.
     fn skip_block_gaps(&mut self, n: usize) -> Option<String> {
-        let mut last_comment: Option<String> = None;
+        let mut accumulated: Option<String> = None;
 
         loop {
             let saved = self.scanner.offset;
 
             // Try blank lines
-            self.skip_blank_lines();
+            let blanks = self.count_and_skip_blank_lines();
 
             // Try comment block
             if let Some(comment) = self.parse_comment_block(n) {
-                last_comment = Some(comment);
+                accumulated = Some(match accumulated {
+                    Some(mut prev) => {
+                        // Preserve blank lines between comment blocks.
+                        for _ in 0..blanks {
+                            prev.push('\n');
+                        }
+                        prev.push('\n');
+                        prev.push_str(&comment);
+                        prev
+                    }
+                    None => comment,
+                });
                 continue;
             }
 
@@ -233,7 +264,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        last_comment
+        accumulated
     }
 
     /// Skip trailing blank lines and comments after the root node.
@@ -946,7 +977,10 @@ impl<'a> Parser<'a> {
         let key = raw_key.validate(self.scanner.source(), self.scanner.offset)?;
 
         let mut map = IndexMap::new();
-        let value_node = self.parse_mapping_value(n)?;
+        let mut value_node = self.parse_mapping_value(n)?;
+        value_node.inline_comment = value_node
+            .inline_comment
+            .or_else(|| self.parse_inline_comment());
         map.insert(key, value_node);
 
         // Check for additional mapping entries on subsequent lines
@@ -988,6 +1022,9 @@ impl<'a> Parser<'a> {
             let next_key = next_raw.validate(self.scanner.source(), self.scanner.offset)?;
 
             let mut value_node = self.parse_mapping_value(n)?;
+            value_node.inline_comment = value_node
+                .inline_comment
+                .or_else(|| self.parse_inline_comment());
             if let Some(c) = comment {
                 value_node.comment = Some(c);
             }
@@ -1185,8 +1222,10 @@ impl<'a> Parser<'a> {
             )));
         }
 
-        // Skip blank lines and comments
-        let comment = self.skip_block_gaps(n);
+        // Skip blank lines and comments. We use usize::MAX here because the
+        // value's indentation hasn't been determined yet — comments belonging
+        // to the indented block may appear at any depth > n.
+        let comment = self.skip_block_gaps(usize::MAX);
 
         // Auto-detect indentation
         let m = self.scanner.count_spaces()?;

@@ -130,6 +130,67 @@ fn arb_node(depth: u32) -> BoxedStrategy<Node> {
     arb_value(depth).prop_map(Node::new).boxed()
 }
 
+/// Generate a random comment string. May contain blank lines between
+/// comment lines to exercise blank-line preservation.
+fn arb_comment() -> impl Strategy<Value = Option<String>> {
+    prop_oneof![
+        3 => Just(None),
+        2 => "[a-zA-Z0-9 ]{1,30}".prop_map(|s| Some(s)),
+        // Two lines, no blank line between
+        1 => ("[a-zA-Z0-9 ]{1,20}", "[a-zA-Z0-9 ]{1,20}")
+            .prop_map(|(a, b)| Some(format!("{a}\n{b}"))),
+        // Two lines with a blank line between
+        1 => ("[a-zA-Z0-9 ]{1,20}", "[a-zA-Z0-9 ]{1,20}")
+            .prop_map(|(a, b)| Some(format!("{a}\n\n{b}"))),
+        // Three lines with blank lines
+        1 => ("[a-zA-Z0-9 ]{1,15}", "[a-zA-Z0-9 ]{1,15}", "[a-zA-Z0-9 ]{1,15}")
+            .prop_map(|(a, b, c)| Some(format!("{a}\n\n{b}\n\n{c}"))),
+    ]
+}
+
+/// Generate a random Node with comments attached.
+fn arb_node_with_comments(depth: u32) -> BoxedStrategy<Node> {
+    (arb_value_with_comments(depth), arb_comment())
+        .prop_map(|(value, comment)| {
+            let mut node = Node::new(value);
+            node.comment = comment;
+            node
+        })
+        .boxed()
+}
+
+/// Generate a random Value tree with comments on children.
+fn arb_value_with_comments(depth: u32) -> impl Strategy<Value = Value> {
+    let leaf = prop_oneof![
+        Just(Value::Null),
+        any::<bool>().prop_map(Value::Bool),
+        any::<i64>().prop_map(Value::Int),
+        (-1e15_f64..1e15_f64)
+            .prop_filter("finite and normal", |f| f.is_finite())
+            .prop_map(|f| Value::Float((f * 1e6).round() / 1e6)),
+        arb_scalar_string().prop_map(Value::Str),
+    ];
+
+    if depth == 0 {
+        leaf.boxed()
+    } else {
+        prop_oneof![
+            4 => leaf,
+            1 => prop::collection::vec(arb_node_with_comments(depth - 1), 0..4)
+                .prop_map(Value::Seq),
+            1 => prop::collection::vec(
+                    (arb_map_key(), arb_node_with_comments(depth - 1)),
+                    0..4
+                )
+                .prop_map(|entries| {
+                    let map: IndexMap<MapKey, Node> = entries.into_iter().collect();
+                    Value::Map(map)
+                }),
+        ]
+        .boxed()
+    }
+}
+
 /// Compare two Values, treating NaN == NaN.
 fn values_equal(a: &Value, b: &Value) -> bool {
     match (a, b) {
@@ -269,5 +330,56 @@ proptest! {
         if let Ok(parsed) = ayml_core::parse(&input) {
             check_span_invariants(&parsed, &input, None)?;
         }
+    }
+
+    /// Emitting a tree with comments and parsing it back must not panic
+    /// and must produce a valid tree.
+    #[test]
+    fn comments_emit_parse_no_panic(node in arb_node_with_comments(3)) {
+        let emitted = ayml_core::emit(&node);
+        let parsed = ayml_core::parse(&emitted);
+        prop_assert!(
+            parsed.is_ok(),
+            "parse failed: {}\n--- emitted ---\n{}---",
+            parsed.unwrap_err(),
+            emitted,
+        );
+    }
+
+    /// Blank lines within comments survive a parse → emit → re-parse cycle.
+    #[test]
+    fn blank_lines_in_comments_stable(
+        comment_a in "[a-zA-Z0-9]{1,10}",
+        comment_b in "[a-zA-Z0-9]{1,10}",
+        blanks in 1..4usize,
+    ) {
+        // In the comment text, blank lines are represented as empty lines:
+        // "a\n\nb" means line "a", blank line, line "b".
+        let sep = "\n".repeat(blanks + 1); // +1: the \n after comment_a + blank lines
+        let comment = format!("{comment_a}{sep}{comment_b}");
+        // In source: "# a\n" + blank_lines + "# b\n..."
+        let blank_lines = "\n".repeat(blanks);
+        let input = format!("# {comment_a}\n{blank_lines}# {comment_b}\nkey: value\n");
+
+        let parsed = ayml_core::parse(&input).map_err(|e| {
+            TestCaseError::fail(format!("parse failed: {e}\n--- input ---\n{input}---"))
+        })?;
+
+        prop_assert!(
+            parsed.comment.as_deref() == Some(comment.as_str()),
+            "blank lines in comment not preserved.\n--- input ---\n{}---",
+            input,
+        );
+
+        // Emit and re-parse — should be stable.
+        let emitted = ayml_core::emit(&parsed);
+        let re_parsed = ayml_core::parse(&emitted).map_err(|e| {
+            TestCaseError::fail(format!("re-parse failed: {e}\n--- emitted ---\n{emitted}---"))
+        })?;
+        prop_assert!(
+            parsed.comment == re_parsed.comment,
+            "comment changed after re-emit.\n--- emitted ---\n{}---",
+            emitted,
+        );
     }
 }
