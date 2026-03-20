@@ -16,19 +16,19 @@ pub fn resolve_sub_schema<'a>(root: &'a Json, path: &[&str]) -> Option<&'a Json>
         }
 
         // Try `items` (array index)
-        if segment.parse::<usize>().is_ok() {
-            if let Some(items) = schema.get("items") {
-                schema = items;
-                continue;
-            }
+        if segment.parse::<usize>().is_ok()
+            && let Some(items) = schema.get("items")
+        {
+            schema = items;
+            continue;
         }
 
         // Try `additionalProperties` as object schema
-        if let Some(additional) = schema.get("additionalProperties") {
-            if additional.is_object() {
-                schema = additional;
-                continue;
-            }
+        if let Some(additional) = schema.get("additionalProperties")
+            && additional.is_object()
+        {
+            schema = additional;
+            continue;
         }
 
         return None;
@@ -39,12 +39,11 @@ pub fn resolve_sub_schema<'a>(root: &'a Json, path: &[&str]) -> Option<&'a Json>
 
 /// Resolve `$ref` pointers (local JSON pointer refs only).
 fn resolve_refs<'a>(root: &'a Json, schema: &'a Json) -> &'a Json {
-    if let Some(ref_str) = schema.get("$ref").and_then(|r| r.as_str()) {
-        if let Some(pointer) = ref_str.strip_prefix('#') {
-            if let Some(resolved) = pointer_lookup(root, pointer) {
-                return resolved;
-            }
-        }
+    if let Some(ref_str) = schema.get("$ref").and_then(|r| r.as_str())
+        && let Some(pointer) = ref_str.strip_prefix('#')
+        && let Some(resolved) = pointer_lookup(root, pointer)
+    {
+        return resolved;
     }
     schema
 }

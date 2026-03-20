@@ -1,3 +1,5 @@
+#![allow(clippy::mutable_key_type)] // Uri from lsp-types has interior mutability but is used as a map key by convention.
+
 mod convert;
 mod locate;
 mod schema;
@@ -311,15 +313,9 @@ fn position_to_offset(text: &str, pos: Position) -> usize {
         if line == pos.line && col == pos.character {
             return i;
         }
-        if ch == '\n' {
+        if ch == '\n' || ch == '\r' {
             if line == pos.line {
                 return i; // cursor is past end of this line
-            }
-            line += 1;
-            col = 0;
-        } else if ch == '\r' {
-            if line == pos.line {
-                return i;
             }
             line += 1;
             col = 0;
