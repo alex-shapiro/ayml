@@ -5,3 +5,4 @@ members = [
     "ayml-lsp",
 ]
 resolver = "3"
+exclude = ["editors/zed"]

@@ -39,6 +39,9 @@ files:
 network:
   rules:
   - host: yaml.org
+  - host: zed.dev
+    ports:
+    - 443
 exec:
   rules:
   - path: ./ayml/fuzz/target/**

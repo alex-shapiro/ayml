@@ -1,0 +1,10 @@
+id = "ayml"
+name = "AYML"
+version = "0.0.1"
+schema_version = 1
+authors = ["Alex <alex@ashell.dev>"]
+description = "AYML language support for Zed"
+
+[language_servers.ayml-lsp]
+name = "ayml-lsp"
+languages = ["AYML"]
