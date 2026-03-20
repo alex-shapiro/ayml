@@ -9,25 +9,30 @@ pub fn resolve_sub_schema<'a>(root: &'a Json, path: &[&str]) -> Option<&'a Json>
     for segment in path {
         schema = resolve_refs(root, schema);
 
-        // Try `properties/<key>`
-        if let Some(sub) = schema.get("properties").and_then(|p| p.get(*segment)) {
-            schema = sub;
+        if let Some(next) = step_into(root, schema, segment) {
+            schema = next;
             continue;
         }
 
-        // Try `items` (array index)
-        if segment.parse::<usize>().is_ok()
-            && let Some(items) = schema.get("items")
-        {
-            schema = items;
-            continue;
+        // Try anyOf/oneOf variants — find the first variant that can resolve
+        // this path segment.
+        let mut found = false;
+        for keyword in &["anyOf", "oneOf"] {
+            if let Some(variants) = schema.get(*keyword).and_then(|v| v.as_array()) {
+                for variant in variants {
+                    let resolved = resolve_refs(root, variant);
+                    if let Some(next) = step_into(root, resolved, segment) {
+                        schema = next;
+                        found = true;
+                        break;
+                    }
+                }
+                if found {
+                    break;
+                }
+            }
         }
-
-        // Try `additionalProperties` as object schema
-        if let Some(additional) = schema.get("additionalProperties")
-            && additional.is_object()
-        {
-            schema = additional;
+        if found {
             continue;
         }
 
@@ -35,6 +40,31 @@ pub fn resolve_sub_schema<'a>(root: &'a Json, path: &[&str]) -> Option<&'a Json>
     }
 
     Some(resolve_refs(root, schema))
+}
+
+/// Try to step into a schema by one path segment.
+fn step_into<'a>(root: &'a Json, schema: &'a Json, segment: &str) -> Option<&'a Json> {
+    // Try `properties/<key>`
+    if let Some(sub) = schema.get("properties").and_then(|p| p.get(segment)) {
+        return Some(sub);
+    }
+
+    // Try `items` (array index)
+    if segment.parse::<usize>().is_ok()
+        && let Some(items) = schema.get("items")
+    {
+        return Some(items);
+    }
+
+    // Try `additionalProperties` as object schema
+    if let Some(additional) = schema.get("additionalProperties")
+        && additional.is_object()
+    {
+        return Some(additional);
+    }
+
+    let _ = root; // used by caller for ref resolution
+    None
 }
 
 /// Resolve `$ref` pointers (local JSON pointer refs only).
@@ -65,34 +95,86 @@ fn pointer_lookup<'a>(root: &'a Json, pointer: &str) -> Option<&'a Json> {
 
 /// Build a markdown hover string from a JSON sub-schema.
 pub fn hover_content(schema: &Json) -> Option<String> {
+    // If the schema itself has no description but is an anyOf/oneOf with a
+    // non-null variant, pull info from that variant too.
+    let effective = effective_schema(schema);
+    hover_content_inner(schema, effective)
+}
+
+/// For anyOf/oneOf like `[{ $ref: "..." }, { type: "null" }]`, return the
+/// non-null variant so we can extract its description/type.
+fn effective_schema(schema: &Json) -> Option<&Json> {
+    for keyword in &["anyOf", "oneOf"] {
+        if let Some(variants) = schema.get(*keyword).and_then(|v| v.as_array()) {
+            for variant in variants {
+                let is_null = variant.get("type").and_then(|t| t.as_str()) == Some("null");
+                if !is_null {
+                    return Some(variant);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn hover_content_inner(schema: &Json, effective: Option<&Json>) -> Option<String> {
     let mut parts = Vec::new();
 
-    if let Some(desc) = schema.get("description").and_then(|d| d.as_str()) {
+    // Try description from the schema itself, then from the effective variant.
+    let desc = schema
+        .get("description")
+        .and_then(|d| d.as_str())
+        .or_else(|| {
+            effective
+                .and_then(|e| e.get("description"))
+                .and_then(|d| d.as_str())
+        });
+    if let Some(desc) = desc {
         parts.push(desc.to_string());
     }
 
-    if let Some(ty) = schema_type_string(schema) {
+    let ty = schema_type_string(schema).or_else(|| effective.and_then(schema_type_string));
+    if let Some(ty) = ty {
         parts.push(format!("**Type:** `{ty}`"));
     }
 
-    if let Some(default) = schema.get("default") {
+    let default = schema
+        .get("default")
+        .or_else(|| effective.and_then(|e| e.get("default")));
+    if let Some(default) = default {
         parts.push(format!("**Default:** `{default}`"));
     }
 
-    if let Some(enum_vals) = schema.get("enum").and_then(|e| e.as_array()) {
+    let enum_vals = schema.get("enum").and_then(|e| e.as_array()).or_else(|| {
+        effective
+            .and_then(|e| e.get("enum"))
+            .and_then(|e| e.as_array())
+    });
+    if let Some(enum_vals) = enum_vals {
         let vals: Vec<String> = enum_vals.iter().map(|v| format!("`{v}`")).collect();
         parts.push(format!("**Allowed values:** {}", vals.join(", ")));
     }
 
-    if let Some(pattern) = schema.get("pattern").and_then(|p| p.as_str()) {
+    let pattern = schema.get("pattern").and_then(|p| p.as_str()).or_else(|| {
+        effective
+            .and_then(|e| e.get("pattern"))
+            .and_then(|p| p.as_str())
+    });
+    if let Some(pattern) = pattern {
         parts.push(format!("**Pattern:** `{pattern}`"));
     }
 
-    if let Some(min) = schema.get("minimum") {
+    let min = schema
+        .get("minimum")
+        .or_else(|| effective.and_then(|e| e.get("minimum")));
+    if let Some(min) = min {
         parts.push(format!("**Minimum:** `{min}`"));
     }
 
-    if let Some(max) = schema.get("maximum") {
+    let max = schema
+        .get("maximum")
+        .or_else(|| effective.and_then(|e| e.get("maximum")));
+    if let Some(max) = max {
         parts.push(format!("**Maximum:** `{max}`"));
     }
 
